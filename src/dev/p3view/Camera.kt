@@ -21,14 +21,18 @@ private const val TRANSFER_LEN = 64 * 1024
 private const val TRANSFERS_IN_FLIGHT = 8
 
 class DisplayFrame(
-    val pixels: IntArray,
+    /** Contrast-stretched level per pixel, 0..255; the view maps it through the palette. */
+    val levels: IntArray,
+    /** Raw thermal values in 1/64 K. */
+    val thermal: IntArray,
     val width: Int,
     val height: Int,
-    val centreC: Float,
     val minC: Float,
     val maxC: Float,
     val fps: Float,
-)
+) {
+    fun celsiusAt(x: Int, y: Int): Float = rawToCelsius(thermal[y * width + x])
+}
 
 interface SessionListener {
     fun onStatus(text: String)
@@ -209,9 +213,8 @@ class CameraSession(
     }
 }
 
-/** Percentile contrast stretch (1st to 99th, smoothed, 2 K minimum span) and ironbow palette. */
+/** Percentile contrast stretch (1st to 99th, smoothed, 2 K minimum span) to 0..255 levels. */
 class Renderer(private val model: Model) {
-    private val lut = ironbow()
     private var lo = 0f
     private var hi = 0f
     private var init = false
@@ -229,34 +232,12 @@ class Renderer(private val model: Model) {
         val minSpan = 2 * 64f
         if (b - a < minSpan) { val mid = (a + b) / 2; a = mid - minSpan / 2; b = mid + minSpan / 2 }
         val scale = 255f / (b - a)
-        val pixels = IntArray(n) { i -> lut[((thermal[i] - a) * scale).toInt().coerceIn(0, 255)] }
-        val w = model.width
+        val levels = IntArray(n) { i -> ((thermal[i] - a) * scale).toInt().coerceIn(0, 255) }
         return DisplayFrame(
-            pixels, w, model.height,
-            centreC = rawToCelsius(thermal[(model.height / 2) * w + w / 2]),
+            levels, thermal, model.width, model.height,
             minC = rawToCelsius(sorted[0]),
             maxC = rawToCelsius(sorted[n - 1]),
             fps = fps,
         )
-    }
-
-    private fun ironbow(): IntArray {
-        val stops = listOf(
-            0.00f to 0x000010, 0.12f to 0x1b0c41, 0.28f to 0x4a0c6b, 0.42f to 0x8f1f74, 0.55f to 0xc8364f,
-            0.68f to 0xee6a24, 0.80f to 0xf9a81a, 0.91f to 0xfbe07b, 1.00f to 0xfffbe6,
-        )
-        return IntArray(256) { i ->
-            val t = i / 255f
-            val k = stops.indices.firstOrNull { it > 0 && t <= stops[it].first }?.minus(1) ?: (stops.size - 2)
-            val (t0, c0) = stops[k]
-            val (t1, c1) = stops[k + 1]
-            val f = ((t - t0) / (t1 - t0)).coerceIn(0f, 1f)
-            fun ch(shift: Int): Int {
-                val x = (c0 shr shift) and 0xff
-                val y = (c1 shr shift) and 0xff
-                return Math.round(x + (y - x) * f) shl shift
-            }
-            (0xff shl 24) or ch(16) or ch(8) or ch(0)
-        }
     }
 }

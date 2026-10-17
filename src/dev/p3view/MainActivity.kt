@@ -7,19 +7,29 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup.LayoutParams
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.PopupMenu
 
 private const val ACTION_USB_PERMISSION = "dev.p3view.USB_PERMISSION"
+private const val PREF_ROTATION = "rotation"
+private const val PREF_PALETTE = "palette"
 
 class MainActivity : Activity(), SessionListener {
     private lateinit var usb: UsbManager
     private lateinit var view: ThermalView
+    private lateinit var prefs: SharedPreferences
     private var session: CameraSession? = null
     private var sessionDevice: String? = null
     private var permissionPending = false
@@ -58,22 +68,56 @@ class MainActivity : Activity(), SessionListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         usb = getSystemService(UsbManager::class.java)
-        view = ThermalView(this)
-        setContentView(view)
+        prefs = getSharedPreferences("p3view", MODE_PRIVATE)
+        view = ThermalView(this).apply {
+            quarterTurns = prefs.getInt(PREF_ROTATION, 0)
+            palette = Palette.byName(prefs.getString(PREF_PALETTE, null))
+            topReserve = 36 * resources.displayMetrics.density
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.insetsController?.apply {
             hide(WindowInsets.Type.systemBars())
             systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        view.setOnClickListener {
-            val s = session
-            if (s != null && s.isAlive) {
-                s.shutter()
-                view.status = ""
-            } else {
-                connect(fromUser = true)
+        // Touches on the image move the crosshair; with no frame (or an error overlay) they retry.
+        view.setOnClickListener { connect(fromUser = true) }
+
+        val dp = resources.displayMetrics.density
+        val paletteButton = IconButton(this, IconButton.Kind.PALETTE).apply {
+            showPalette(view.palette)
+            setOnClickListener { showPaletteMenu(this) }
+        }
+        val rotateButton = IconButton(this, IconButton.Kind.ROTATE).apply {
+            setOnClickListener {
+                view.quarterTurns += 1
+                prefs.edit().putInt(PREF_ROTATION, view.quarterTurns).apply()
             }
         }
+        val shutterButton = IconButton(this, IconButton.Kind.SHUTTER).apply {
+            setOnClickListener {
+                val s = session
+                if (s != null && s.isAlive) s.shutter()
+            }
+        }
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            for (b in listOf(paletteButton, rotateButton, shutterButton)) {
+                addView(b, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = (8 * dp).toInt()
+                })
+            }
+            setOnApplyWindowInsetsListener { v, insets ->
+                val safe = insets.getInsetsIgnoringVisibility(
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+                )
+                v.setPadding(safe.left, safe.top + (8 * dp).toInt(), safe.right + (8 * dp).toInt(), 0)
+                insets
+            }
+        }
+        setContentView(FrameLayout(this).apply {
+            addView(view, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            addView(buttons, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
+        })
         val filter = IntentFilter().apply {
             addAction(ACTION_USB_PERMISSION)
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
@@ -152,6 +196,22 @@ class MainActivity : Activity(), SessionListener {
         view.status = "Connecting"
         sessionDevice = device.deviceName
         session = CameraSession(conn, device, Model.fromPid(device.productId)!!, this).also { it.start() }
+    }
+
+    private fun showPaletteMenu(anchor: View) {
+        val menu = PopupMenu(this, anchor)
+        Palette.ALL.forEachIndexed { i, p ->
+            menu.menu.add(0, i, i, p.name).apply { isCheckable = true; isChecked = p === view.palette }
+        }
+        menu.menu.setGroupCheckable(0, true, true)
+        menu.setOnMenuItemClickListener { item ->
+            val p = Palette.ALL[item.itemId]
+            view.palette = p
+            (anchor as IconButton).showPalette(p)
+            prefs.edit().putString(PREF_PALETTE, p.name).apply()
+            true
+        }
+        menu.show()
     }
 
     private fun stopSession() {

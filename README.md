@@ -40,10 +40,11 @@ build installs over the previous one.
    the prompt next time).
 3. The stream starts after about 3 seconds.
 
-The screen shows the thermal image with an ironbow palette, the temperature at the centre
-crosshair, frame min/max and fps. Tap the image to trigger the shutter (NUC); after an
-error, tap to retry. The stream stops when the app leaves the foreground and restarts
-when it returns.
+The screen shows the thermal image, the temperature at the crosshair, frame min/max and fps.
+Tap or drag on the image to move the crosshair. Buttons at the top right: colour scheme
+(popup menu), rotate 90°, and shutter (NUC). Rotation and colour scheme are remembered.
+After an error, tap the screen to retry. The stream stops when the app leaves the
+foreground and restarts when it returns.
 
 Logs: `adb logcat -s p3view`.
 
@@ -52,7 +53,9 @@ Logs: `adb logcat -s p3view`.
 ```
 src/dev/p3view/Protocol.kt     commands, CRC, markers, transfer joiner, frame assembler (pure Kotlin)
 src/dev/p3view/Camera.kt       USB session thread: claim, commands, stream start, bulk reads, rendering
-src/dev/p3view/ThermalView.kt  draws the frame scaled to fit, crosshair, text
+src/dev/p3view/ThermalView.kt  draws the frame scaled, rotated, palette, crosshair, text
+src/dev/p3view/Palette.kt      colour schemes
+src/dev/p3view/IconButton.kt   canvas-drawn round buttons
 src/dev/p3view/MainActivity.kt permissions, attach/detach, lifecycle
 test/ProtocolTest.kt           JVM tests for Protocol.kt, run by build.sh
 build.sh                       aapt2 -> kotlinc -> d8 -> zip -> zipalign -> apksigner
