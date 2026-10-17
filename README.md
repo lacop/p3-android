@@ -6,31 +6,47 @@ Open the app, plug in the camera, see the thermal image. Target: Pixel 10 on And
 
 Plain Kotlin against the platform SDK: no Gradle, no AndroidX, no native code.
 
+## Signing key
+
+Android only installs an update over an existing app if both APKs are signed with the same
+key, so the repo's builds are signed with a key you create once. It is not in the repo
+(`debug.keystore` is git-ignored); create it in the repo root:
+
+```sh
+nix develop -c ./genkey.sh    # writes debug.keystore, password "android"
+```
+
+Keep that file. If you lose it, or generate a new one, uninstall the app from the phone
+before installing the next build (its saved settings go with it).
+
 ## Build
 
 ```sh
-nix build            # result/p3view.apk
+nix build            # result/p3view-unsigned.apk
+nix run .#sign       # signs it with ./debug.keystore into build/p3view.apk
 ```
+
+The Nix build cannot see the git-ignored key, so `nix build` makes an unsigned APK and
+`nix run .#sign` signs it. Run `nix run` from the repo root.
 
 The flake accepts the Android SDK license and pulls platform 37.0 and build-tools 37.0.0
 through nixpkgs `androidenv`. These are unfree, so they come from Google's servers rather
 than the NixOS binary cache.
 
 Without Nix: `nix develop` gives a shell with everything set, or export `ANDROID_JAR`,
-`BUILD_TOOLS` and `KOTLIN_STDLIB` yourself and run `./build.sh`.
+`BUILD_TOOLS` and `KOTLIN_STDLIB` yourself and run `./build.sh`, which also signs
+`build/p3view.apk` when `debug.keystore` exists.
 
 ## Install
 
 With USB debugging enabled on the phone:
 
 ```sh
-nix run .#install    # adb install -r result/p3view.apk
+nix run .#install    # builds, signs, then adb install -r build/p3view.apk
 ```
 
-Or copy `result/p3view.apk` to the phone and open it (allow installing unknown apps).
-
-The APK is signed with `debug.keystore` from this repo (password `android`), so every
-build installs over the previous one.
+Or copy `build/p3view.apk` (from `nix run .#sign`) to the phone and open it (allow
+installing unknown apps).
 
 ## Use
 

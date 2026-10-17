@@ -3,14 +3,14 @@
 #   ANDROID_JAR    platforms/android-NN/android.jar
 #   BUILD_TOOLS    build-tools/X.Y.Z directory (aapt2, d8, zipalign, apksigner)
 #   KOTLIN_STDLIB  kotlin-stdlib.jar matching the kotlinc on PATH
-#   KEYSTORE       signing keystore (default: debug.keystore, password "android")
+#   KEYSTORE       signing keystore (default: debug.keystore, see genkey.sh); without it only
+#                  the unsigned APK is produced, which is what the Nix build does
 #   LINK_JAR       android.jar for resource linking (default: ANDROID_JAR)
-# Output: $OUT/p3view.apk (default OUT=build)
+# Output: $OUT/p3view-unsigned.apk, and $OUT/p3view.apk when the keystore exists (default OUT=build)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 : "${ANDROID_JAR:?}" "${BUILD_TOOLS:?}" "${KOTLIN_STDLIB:?}"
-KEYSTORE=${KEYSTORE:-debug.keystore}
 LINK_JAR=${LINK_JAR:-$ANDROID_JAR}
 OUT=${OUT:-build}
 MIN_SDK=36
@@ -42,8 +42,11 @@ find "$OUT/classes" -name '*.class' > "$OUT/classes.txt"
 
 echo "== package"
 (cd "$OUT/dex" && zip -q -X ../unsigned.apk classes*.dex)
-"$BUILD_TOOLS/zipalign" -p -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
-"$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
-  --out "$OUT/p3view.apk" "$OUT/aligned.apk"
-"$BUILD_TOOLS/apksigner" verify "$OUT/p3view.apk"
-echo "built $OUT/p3view.apk"
+"$BUILD_TOOLS/zipalign" -p -f 4 "$OUT/unsigned.apk" "$OUT/p3view-unsigned.apk"
+echo "built $OUT/p3view-unsigned.apk"
+if [ -f "${KEYSTORE:-debug.keystore}" ]; then
+  KEYSTORE=${KEYSTORE:-debug.keystore} ./sign.sh "$OUT/p3view-unsigned.apk" "$OUT/p3view.apk"
+  echo "signed $OUT/p3view.apk"
+else
+  echo "no keystore, not signed (run ./genkey.sh)"
+fi

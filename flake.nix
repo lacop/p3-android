@@ -45,19 +45,38 @@
           runHook postBuild
         '';
         installPhase = ''
-          install -Dm644 build/p3view.apk $out/p3view.apk
+          install -Dm644 build/p3view-unsigned.apk $out/p3view-unsigned.apk
         '';
       };
+      # The Nix build cannot see the git-ignored signing key, so it makes an unsigned APK and
+      # these apps sign it with ./debug.keystore (see genkey.sh) from the current directory.
+      sign = pkgs.writeShellScript "p3view-sign" ''
+        set -euo pipefail
+        export PATH=${pkgs.jdk21_headless}/bin:$PATH
+        export BUILD_TOOLS=$(echo ${sdk}/build-tools/*)
+        mkdir -p build
+        ${./sign.sh} ${apk}/p3view-unsigned.apk build/p3view.apk
+      '';
     in
     {
       packages.${system}.default = apk;
 
-      # nix run .#install   (phone connected with USB debugging enabled)
-      apps.${system}.install = {
-        type = "app";
-        program = toString (pkgs.writeShellScript "p3view-install" ''
-          exec ${pkgs.android-tools}/bin/adb install -r ${apk}/p3view.apk
-        '');
+      apps.${system} = {
+        # nix run .#sign      signs the build into build/p3view.apk
+        sign = {
+          type = "app";
+          program = toString sign;
+        };
+
+        # nix run .#install   signs, then installs over adb (phone connected with USB debugging enabled)
+        install = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "p3view-install" ''
+            set -euo pipefail
+            ${sign}
+            exec ${pkgs.android-tools}/bin/adb install -r build/p3view.apk
+          '');
+        };
       };
 
       # nix develop; ./build.sh
