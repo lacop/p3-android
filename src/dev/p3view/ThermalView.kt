@@ -113,10 +113,10 @@ class ThermalView(context: Context) : View(context) {
     private val histPaint = Paint()
 
     /**
-     * Percentile plot of the pixel temperatures: 80% of the view width, one column per screen pixel.
-     * The pixels, ordered by temperature, are split into that many equal buckets; column i is the
-     * i-th bucket (left = coldest) and grows up from the bottom of the box in proportion to its
-     * temperature between the frame minimum (zero) and maximum (full height), independent of the colour range.
+     * Histogram of the pixel temperatures: 80% of the view width, one column per screen pixel. The
+     * range from the frame minimum to the maximum is split into that many equal temperature steps,
+     * and each column grows up from the bottom of the box in proportion to the number of pixels in
+     * its step (the tallest column fills the box). Independent of the colour range.
      */
     private fun drawHistogram(c: Canvas, f: DisplayFrame, top: Float, height: Float) {
         val n = (0.8f * width).toInt()
@@ -135,21 +135,23 @@ class ThermalView(context: Context) : View(context) {
     private fun computeHistogram(f: DisplayFrame, n: Int) {
         val minRaw = f.thermal[f.minIndex]
         val maxRaw = f.thermal[f.maxIndex]
-        // Counting sort: how many pixels per raw value (1/64 K), then walk the cumulative count.
-        val counts = IntArray(maxRaw - minRaw + 1)
+        // Pixels per raw value (1/64 K). A raw value covers the span [r, r + 1), so when there are
+        // more columns than raw values a value fills several columns with its count shared out
+        // instead of leaving gaps between single-value columns.
+        val size = maxRaw - minRaw + 1
+        val counts = IntArray(size)
         for (r in f.thermal) counts[r - minRaw]++
-        val total = f.thermal.size
-        val span = maxOf(maxRaw - minRaw, 1).toFloat()
-        val heights = FloatArray(n)
-        var value = 0
-        var cum = counts[0]
-        for (i in 0 until n) {
-            val rank = ((i + 0.5f) / n * total).toInt() // middle pixel of this bucket, in temperature order
-            while (cum <= rank && value < counts.size - 1) { value++; cum += counts[value] }
-            heights[i] = value / span
+        val cum = IntArray(size + 1)
+        for (k in 0 until size) cum[k + 1] = cum[k] + counts[k]
+        fun upTo(x: Float): Float {
+            val k = Math.floor(x.toDouble()).toInt().coerceIn(0, size - 1)
+            return cum[k] + counts[k] * (x.coerceAtMost(size.toFloat()) - k)
         }
+        val step = size.toFloat() / n
+        val columns = FloatArray(n) { i -> upTo((i + 1) * step) - upTo(i * step) }
+        val tallest = maxOf(columns.max(), 1e-3f)
         histFrame = f
-        histHeights = heights
+        histHeights = FloatArray(n) { columns[it] / tallest }
     }
 
     /** The frame currently on screen, if any. */
