@@ -18,7 +18,7 @@ import kotlin.math.sqrt
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
 class IconButton(context: Context, private val kind: Kind, private val sizeDp: Float = 44f) : View(context) {
-    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY, DISPLAY }
+    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY, DISPLAY, PAUSE }
 
     private val dp = resources.displayMetrics.density
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -49,6 +49,10 @@ class IconButton(context: Context, private val kind: Kind, private val sizeDp: F
     var flashColor = Color.WHITE
     private var flash = 0f
 
+    /** For the pause button: show the play symbol instead of the pause symbol. */
+    var showPlay = false
+        set(v) { field = v; contentDescription = if (v) "Resume" else "Pause"; invalidate() }
+
     /** Briefly tints the background and fades back, so a tap is visibly registered. */
     fun flash() {
         ValueAnimator.ofFloat(1f, 0f).apply {
@@ -70,6 +74,7 @@ class IconButton(context: Context, private val kind: Kind, private val sizeDp: F
             Kind.SNAPSHOT -> "Save snapshot"
             Kind.GALLERY -> "Open snapshot folder"
             Kind.DISPLAY -> "Readout options"
+            Kind.PAUSE -> "Pause"
         }
     }
 
@@ -188,6 +193,22 @@ class IconButton(context: Context, private val kind: Kind, private val sizeDp: F
                 line.strokeWidth = 2 * dp
                 c.drawCircle(cx, cy + 6 * dp, 4.5f * dp, fill)
                 c.drawRect(cx - 0.9f * dp, cy - 4 * dp, cx + 0.9f * dp, cy + 6 * dp, fill)
+            }
+            Kind.PAUSE -> {
+                if (showPlay) {
+                    val tri = Path().apply {
+                        moveTo(cx - 6 * dp, cy - 9 * dp)
+                        lineTo(cx + 9 * dp, cy)
+                        lineTo(cx - 6 * dp, cy + 9 * dp)
+                        close()
+                    }
+                    c.drawPath(tri, fill)
+                } else {
+                    box.set(cx - 8 * dp, cy - 9 * dp, cx - 2.5f * dp, cy + 9 * dp)
+                    c.drawRoundRect(box, 1.5f * dp, 1.5f * dp, fill)
+                    box.offset(10.5f * dp, 0f)
+                    c.drawRoundRect(box, 1.5f * dp, 1.5f * dp, fill)
+                }
             }
             Kind.INFO -> {
                 glyph.textSize = 24 * dp

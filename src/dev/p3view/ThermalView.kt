@@ -74,7 +74,11 @@ class ThermalView(context: Context) : View(context) {
     var opacity = 0.5f
         set(v) { field = v; invalidate() }
 
+    /** While set, new frames are dropped and the last one stays on screen. */
+    @Volatile var paused = false
+
     fun submit(frame: DisplayFrame) {
+        if (paused) return
         latest.set(frame)
         postInvalidateOnAnimation()
     }

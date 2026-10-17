@@ -51,6 +51,8 @@ private const val PREF_PAN_X = "panx_"
 private const val PREF_PAN_Y = "pany_"
 private const val ZOOM_MIN = 0.5f
 private const val ZOOM_MAX = 2f
+private const val LIVE_COLOR = 0xE61565C0.toInt()   // pause button while live
+private const val PAUSED_COLOR = 0xE6EF6C00.toInt() // and while paused
 private const val PAN_MAX = 0.3f
 
 class MainActivity : Activity(), SessionListener {
@@ -68,6 +70,8 @@ class MainActivity : Activity(), SessionListener {
     private var started = false
     private lateinit var snapshots: SnapshotWriter
     private lateinit var snapshotCount: TextView
+    private lateinit var pauseButton: IconButton
+    private var paused = false
     // Model, serial and firmware of the connected camera; written from the USB thread.
     @Volatile private var deviceInfo = ""
     private var refreshPanel: (() -> Unit)? = null
@@ -102,6 +106,7 @@ class MainActivity : Activity(), SessionListener {
                         view.clearFrame()
                         deviceInfo = ""
                         view.status = "Camera unplugged"
+                        setPaused(false)
                     }
                 }
             }
@@ -206,13 +211,21 @@ class MainActivity : Activity(), SessionListener {
                 flash()
             }
         }
+        pauseButton = IconButton(this, IconButton.Kind.PAUSE, 72f).apply {
+            color = LIVE_COLOR
+            pressedColor = 0xFF64B5F6.toInt()
+            setOnClickListener {
+                setPaused(!paused)
+                flash()
+            }
+        }
 
-        fun corner(vararg children: View, top: Boolean) = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        fun corner(vararg children: View, top: Boolean, vertical: Boolean = false) = LinearLayout(this).apply {
+            orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = if (vertical) Gravity.END else Gravity.CENTER_VERTICAL
             for (b in children) {
                 addView(b, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = (8 * dp).toInt()
+                    if (vertical) topMargin = (8 * dp).toInt() else marginStart = (8 * dp).toInt()
                 })
             }
             setOnApplyWindowInsetsListener { v, insets ->
@@ -229,7 +242,16 @@ class MainActivity : Activity(), SessionListener {
             setOnClickListener { openSnapshotFolder() }
         }
         val infoCorner = corner(infoButton, galleryButton, top = true)
-        val snapshotCorner = corner(snapshotCount, snapshotButton, top = false)
+        // The pause button sits above the snapshot button; the queue length is left of the latter.
+        val snapshotRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(snapshotCount)
+            addView(snapshotButton, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                marginStart = (8 * dp).toInt()
+            })
+        }
+        val snapshotCorner = corner(pauseButton, snapshotRow, top = false, vertical = true)
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(preview, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -261,6 +283,7 @@ class MainActivity : Activity(), SessionListener {
     }
 
     override fun onStop() {
+        setPaused(false) // the preview surface goes away, so a frozen camera view could not be kept
         started = false
         updateOverlay()
         super.onStop()
@@ -446,6 +469,15 @@ class MainActivity : Activity(), SessionListener {
     }
 
     private fun refresh() { refreshPanel?.invoke() }
+
+    /** Freezes or resumes both the thermal image and the phone camera preview. */
+    private fun setPaused(p: Boolean) {
+        paused = p
+        view.paused = p
+        overlayCamera.setPaused(p)
+        pauseButton.showPlay = p
+        pauseButton.color = if (p) PAUSED_COLOR else LIVE_COLOR
+    }
 
     private fun showSnapshotCount() {
         val n = snapshots.count

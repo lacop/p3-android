@@ -93,6 +93,12 @@ Files are named after the local time of the press, `YYYYMMDD-HHMMSS-SSS`:
 Files are rendered and written on a background thread. A number next to the button shows how
 many snapshots are still waiting.
 
+The pause button above the snapshot button freezes both the thermal image and the phone camera
+view on their current frame and turns into a play button; press it again to resume. While
+paused you can still move the crosshair, change the colour scheme, rotate, adjust the camera
+overlay sliders, and take snapshots of the frozen frame. Pausing ends when the app goes to the
+background or the camera is unplugged.
+
 Logs: `adb logcat -s p3view`.
 
 ## How it works

@@ -11,6 +11,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.display.DisplayManager
@@ -29,6 +30,7 @@ import kotlin.math.ln
 import kotlin.math.max
 
 private const val TAG = "p3view"
+private const val WARMUP_FRAMES = 10
 
 /** One selectable rear camera: a physical camera, opened through its logical camera if it has one. */
 class Lens(val key: String, val label: String, val logicalId: String, val physicalId: String?)
@@ -90,6 +92,19 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
     private var surface: Surface? = null
     private var lens: Lens? = null
     private var texture: SurfaceTexture? = null
+    private var request: CaptureRequest? = null
+    private var frames = 0
+
+    /** Freezes the preview on its last frame: the repeating request stops, the view keeps the image. */
+    @Volatile private var paused = false
+    private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
+            synchronized(this@OverlayCamera) {
+                // A session that starts while paused runs a few frames first, so exposure has settled.
+                if (++frames >= WARMUP_FRAMES && paused && s === session) stopRepeating(s)
+            }
+        }
+    }
 
     @Synchronized fun start(lens: Lens, view: CameraPreview) {
         val tex = view.surfaceTexture ?: return
@@ -120,8 +135,28 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
         }
     }
 
+    @Synchronized fun setPaused(p: Boolean) {
+        paused = p
+        val s = session ?: return
+        if (p) {
+            if (frames >= WARMUP_FRAMES) stopRepeating(s)
+        } else {
+            try {
+                s.setRepeatingRequest(request ?: return, captureCallback, handler)
+            } catch (e: Exception) {
+                Log.w(TAG, "cannot resume phone camera", e)
+            }
+        }
+    }
+
+    private fun stopRepeating(s: CameraCaptureSession) {
+        try { s.stopRepeating() } catch (e: Exception) { Log.w(TAG, "cannot pause phone camera", e) }
+    }
+
     @Synchronized fun stop() {
         gen++
+        request = null
+        frames = 0
         session?.close()
         device?.close()
         surface?.release()
@@ -148,7 +183,11 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
                                 addTarget(surface)
                                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                             }.build()
-                            s.setRepeatingRequest(req, null, null)
+                            synchronized(this@OverlayCamera) {
+                                request = req
+                                frames = 0
+                            }
+                            s.setRepeatingRequest(req, captureCallback, null)
                         } catch (e: Exception) {
                             fail(my, "Phone camera preview failed: ${e.message}")
                         }
