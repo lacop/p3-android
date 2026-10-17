@@ -95,6 +95,15 @@ class ThermalView(context: Context) : View(context) {
         postInvalidateOnAnimation()
     }
 
+    private var notice = ""
+
+    /** Short message over the top of the image that disappears by itself. */
+    fun showNotice(text: String, ms: Long) {
+        notice = text
+        invalidate()
+        postDelayed({ if (notice == text) { notice = ""; invalidate() } }, ms)
+    }
+
     /** The frame currently on screen, if any. */
     fun currentFrame(): DisplayFrame? = latest.get()
 
@@ -281,6 +290,11 @@ class ThermalView(context: Context) : View(context) {
             }
 
             c.drawText(fmt("%.1f fps", f.fps), left, bottom, text)
+
+            if (notice.isNotEmpty()) {
+                val img = displayedRect(f)
+                c.drawText(notice, (width - big.measureText(notice)) / 2, img.top + 32 * dp, big)
+            }
         }
         if (status.isNotEmpty()) {
             val lines = status.split('\n')

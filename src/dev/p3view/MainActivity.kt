@@ -150,7 +150,14 @@ class MainActivity : Activity(), SessionListener {
         val shutterButton = IconButton(this, IconButton.Kind.SHUTTER).apply {
             setOnClickListener {
                 val s = session
-                if (s != null && s.isAlive) s.shutter()
+                val running = s != null && s.isAlive
+                if (running) {
+                    s!!.shutter()
+                    view.showNotice("Calibrating…", 1200)
+                }
+                // White flash when sent, red when there is no camera to calibrate.
+                flashColor = if (running) Color.WHITE else 0xFFFF1744.toInt()
+                flash()
             }
         }
 

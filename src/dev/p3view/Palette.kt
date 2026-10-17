@@ -14,6 +14,22 @@ class Palette(val name: String, val lut: IntArray) {
                 0.78f to 0xffe000, 1.00f to 0xff2000),
             gradient("Lava",
                 0.00f to 0x000000, 0.35f to 0x8b0000, 0.65f to 0xff6a00, 0.85f to 0xffd000, 1.00f to 0xffffff),
+            // FLIR-style "Arctic": deep blue through white to orange and red.
+            gradient("Arctic",
+                0.00f to 0x00002e, 0.20f to 0x0b3d91, 0.40f to 0x3fa0e8, 0.55f to 0xcfeeff, 0.70f to 0xffe9a8,
+                0.85f to 0xff9a3c, 1.00f to 0xd7261e),
+            // Rainbow with more bands, so small steps stand out.
+            gradient("Rainbow HC",
+                0.00f to 0x000000, 0.10f to 0x2a0080, 0.20f to 0x0040ff, 0.30f to 0x00d0ff, 0.40f to 0x00e060,
+                0.50f to 0xa0e000, 0.60f to 0xffe000, 0.70f to 0xff8000, 0.80f to 0xff0000, 0.90f to 0xff00a0,
+                1.00f to 0xffffff),
+            gradient("Jet",
+                0.000f to 0x000080, 0.125f to 0x0000ff, 0.375f to 0x00ffff, 0.625f to 0xffff00, 0.875f to 0xff0000,
+                1.000f to 0x800000),
+            gradient("Blue-white-red", 0f to 0x1a1aff, 0.5f to 0xffffff, 1f to 0xff1a1a),
+            gradient("Night green", 0f to 0x000000, 0.6f to 0x00a040, 1f to 0xc0ffc0),
+            gradient("Viridis",
+                0.00f to 0x440154, 0.25f to 0x3b528b, 0.50f to 0x21918c, 0.75f to 0x5ec962, 1.00f to 0xfde725),
         )
 
         fun byName(name: String?): Palette = ALL.firstOrNull { it.name == name } ?: ALL[0]

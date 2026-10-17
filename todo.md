@@ -20,3 +20,15 @@ Effort: S small, M medium, L large.
    camera session.
 8. **Pinch-zoom and pan (M).** Zoom into the thermal image (and the camera view with it) while
    paused or live. Left out of the pause feature for now.
+9. **Last-snapshot thumbnail (M).** A small preview next to the snapshot button. Tapping it opens
+   the image or the share sheet; it also confirms the file was saved.
+10. **Patch-averaged crosshair reading (S).** A single pixel is noisy (about ±0.04 K). Average a
+    3x3 or 5x5 patch around the crosshair for the number, as a setting.
+11. **Low/high gain switch (S/M).** Tried and backed out. The gain commands match the documented
+    P3 protocol (`012f41000000...3c3a` low, `012f41000100...4939` high, via request 0x20, and
+    `Commands.gain` in `Protocol.kt` builds them), but in low gain a hand at ~33 °C read -30 °C,
+    below the documented 0-550 °C range. Suspected cause: the camera needs a shutter calibration
+    after switching. To try: send a shutter command ~0.5 s after the gain command; if readings
+    are still off, take high and low gain snapshots (`-raw.bin`) of the same still scene with
+    something hot in it and fit a correction. Only send gain once the user has chosen one, so the
+    camera keeps its default until then.
