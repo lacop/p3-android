@@ -197,8 +197,14 @@ class MainActivity : Activity(), SessionListener {
             textSize = 20f
             visibility = View.GONE
         }
-        val snapshotButton = IconButton(this, IconButton.Kind.SNAPSHOT).apply {
-            setOnClickListener { takeSnapshot() }
+        val snapshotButton = IconButton(this, IconButton.Kind.SNAPSHOT, 72f).apply {
+            color = 0xE62E7D32.toInt()
+            pressedColor = 0xFF66BB6A.toInt()
+            setOnClickListener {
+                // White flash when queued, red when there was nothing to save.
+                flashColor = if (takeSnapshot()) Color.WHITE else 0xFFFF1744.toInt()
+                flash()
+            }
         }
 
         fun corner(vararg children: View, top: Boolean) = LinearLayout(this).apply {
@@ -448,11 +454,11 @@ class MainActivity : Activity(), SessionListener {
     }
 
     /** Queues a snapshot. Only references and one bitmap copy are taken here; the worker does the rest. */
-    private fun takeSnapshot() {
+    private fun takeSnapshot(): Boolean {
         val f = view.currentFrame()
         if (f == null) {
             Toast.makeText(this, "No thermal image yet", Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
         val stem = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"))
         val (cx, cy) = view.crosshairPixel(f)
@@ -460,6 +466,7 @@ class MainActivity : Activity(), SessionListener {
         snapshots.submit(
             SnapshotJob(stem, System.currentTimeMillis(), f, view.palette.lut, view.quarterTurns, cx, cy, visible, visible?.let { view.displayedRect(f) }, view.showMarkers)
         )
+        return true
     }
 
     /** Opens the snapshot folder in the system file browser. */

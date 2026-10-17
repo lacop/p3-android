@@ -217,23 +217,25 @@ class ThermalView(context: Context) : View(context) {
             }
 
             if (showScale) {
-                // Colour scale on the line above the min/max text; the right end stays clear of the buttons.
+                // Colour scale just below the thermal image, centred, with the end
+                // temperatures beside it. When the image leaves no room, it sits above the min/max line.
                 val lo = "%.1f °C".format(f.loC)
                 val hi = "%.1f °C".format(f.hiC)
-                val x1 = width - (safe?.right ?: 0) - 96 * dp
-                val barTop = bottom - 44 * dp
-                val barBottom = barTop + 12 * dp
-                val x0 = left + text.measureText(lo) + 8 * dp
-                val x2 = x1 - text.measureText(hi) - 8 * dp
+                val img = displayedRect(f)
+                val pad = maxOf(text.measureText(lo), text.measureText(hi)) + 8 * dp
+                val x0 = img.left + 10 * dp + pad
+                val x1 = img.right - 10 * dp - pad
+                val barBottom = minOf(img.bottom + 6 * dp + 12 * dp, bottom - 22 * dp)
+                val barTop = barBottom - 12 * dp
                 val base = barBottom - (12 * dp - text.textSize * 0.7f) / 2
-                if (x2 > x0 + 20 * dp) {
+                if (x1 > x0 + 20 * dp) {
                     val sb = scaleBitmap?.takeIf { shownPalette === palette } ?: Bitmap.createBitmap(palette.lut, 256, 1, Bitmap.Config.ARGB_8888)
                         .also { scaleBitmap = it; shownPalette = palette }
-                    scaleRect.set(x0, barTop, x2, barBottom)
+                    scaleRect.set(x0, barTop, x1, barBottom)
                     c.drawBitmap(sb, null, scaleRect, scalePaint)
                     c.drawRect(scaleRect, markerRing)
-                    c.drawText(lo, left, base, text)
-                    c.drawText(hi, x1 - text.measureText(hi), base, text)
+                    c.drawText(lo, x0 - 8 * dp - text.measureText(lo), base, text)
+                    c.drawText(hi, x1 + 8 * dp, base, text)
                 }
             }
 

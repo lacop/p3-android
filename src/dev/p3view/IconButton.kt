@@ -1,6 +1,8 @@
 package dev.p3view
 
 import android.content.Context
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -15,7 +17,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
-class IconButton(context: Context, private val kind: Kind) : View(context) {
+class IconButton(context: Context, private val kind: Kind, private val sizeDp: Float = 44f) : View(context) {
     enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY, DISPLAY }
 
     private val dp = resources.displayMetrics.density
@@ -40,6 +42,22 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     var active = false
         set(v) { field = v; invalidate() }
 
+    /** Background colour when idle; null keeps the default translucent black. */
+    var color: Int? = null
+        set(v) { field = v; invalidate() }
+    var pressedColor: Int? = null
+    var flashColor = Color.WHITE
+    private var flash = 0f
+
+    /** Briefly tints the background and fades back, so a tap is visibly registered. */
+    fun flash() {
+        ValueAnimator.ofFloat(1f, 0f).apply {
+            duration = 600
+            addUpdateListener { flash = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
     init {
         isClickable = true
         contentDescription = when (kind) {
@@ -63,7 +81,7 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     }
 
     override fun onMeasure(w: Int, h: Int) {
-        val size = (44 * dp).toInt()
+        val size = (sizeDp * dp).toInt()
         setMeasuredDimension(size, size)
     }
 
@@ -75,12 +93,17 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     override fun onDraw(c: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
-        bg.color = when {
-            isPressed -> 0xB0606060.toInt()
+        val base = when {
+            isPressed -> pressedColor ?: 0xB0606060.toInt()
             active -> 0xCC2979FF.toInt()
-            else -> 0x80000000.toInt()
+            else -> color ?: 0x80000000.toInt()
         }
+        bg.color = if (flash > 0f) ArgbEvaluator().evaluate(flash, base, flashColor) as Int else base
         c.drawCircle(cx, cy, width / 2f, bg)
+        // Icons are drawn for a 44 dp button; larger buttons scale them up.
+        val unit = sizeDp / 44f
+        c.save()
+        c.scale(unit, unit, cx, cy)
         when (kind) {
             Kind.SHUTTER -> {
                 // Aperture iris: a ring, a small hexagon and each hexagon edge extended to the ring.
@@ -200,5 +223,6 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
                 line.strokeWidth = 2 * dp
             }
         }
+        c.restore()
     }
 }
