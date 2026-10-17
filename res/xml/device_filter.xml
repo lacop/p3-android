@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ThermalMaster P3 (0x3474:0x45a2) and P1 (0x3474:0x45c2) -->
+    <usb-device vendor-id="13428" product-id="17826" />
+    <usb-device vendor-id="13428" product-id="17858" />
+</resources>
