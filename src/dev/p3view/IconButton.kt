@@ -16,7 +16,7 @@ import kotlin.math.sqrt
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
 class IconButton(context: Context, private val kind: Kind) : View(context) {
-    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY }
+    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY, DISPLAY }
 
     private val dp = resources.displayMetrics.density
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -51,6 +51,7 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
             Kind.INFO -> "Camera info"
             Kind.SNAPSHOT -> "Save snapshot"
             Kind.GALLERY -> "Open snapshot folder"
+            Kind.DISPLAY -> "Readout options"
         }
     }
 
@@ -155,6 +156,15 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
                     close()
                 }
                 c.drawPath(hills, fill)
+            }
+            Kind.DISPLAY -> {
+                // Thermometer: outlined stem, filled bulb and mercury.
+                val stem = 2.75f * dp
+                box.set(cx - stem, cy - 10 * dp, cx + stem, cy + 3 * dp)
+                c.drawRoundRect(box, stem, stem, line.apply { strokeWidth = 1.75f * dp })
+                line.strokeWidth = 2 * dp
+                c.drawCircle(cx, cy + 6 * dp, 4.5f * dp, fill)
+                c.drawRect(cx - 0.9f * dp, cy - 4 * dp, cx + 0.9f * dp, cy + 6 * dp, fill)
             }
             Kind.INFO -> {
                 glyph.textSize = 24 * dp

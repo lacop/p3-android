@@ -47,16 +47,27 @@ on, the rear camera shows behind the thermal image and an extra button opens the
 and opacity controls, which apply live. Zoom 1× scales the camera image to the same field of
 view as the thermal lens (P3 40°, P1 52° horizontal), so the zoom and shift sliders only fine-tune.
 All settings are remembered (zoom and shift per lens).
+
+The thermometer button (between rotate and shutter) opens toggles for readouts:
+- **Hottest / coldest markers**: tags with temperatures on the hottest and coldest pixel (also
+  drawn in `-annotated.png` when on).
+- **Lock colour scale**: freezes the current colour range, so colours mean the same temperature
+  from frame to frame and between snapshots. Not remembered across launches.
+- **Colour scale bar**: draws the palette with its end temperatures along the bottom.
+The marker and scale bar settings are remembered.
 After an error, tap the screen to retry. The stream stops when the app leaves the
 foreground and restarts when it returns.
 
 The **?** button at the top left shows the camera model, serial number and firmware.
 
-The camera button at the bottom right saves a snapshot to `Pictures/p3view` on the phone, so the
-gallery, the Files app and share sheets see it. The picture button next to **?** opens that folder.
+The camera button at the bottom right saves a snapshot to `Documents/p3view` on the phone, so the
+Files app and share sheets see it. The picture button next to **?** opens that folder.
 Files are named after the local time of the press, `YYYYMMDD-HHMMSS-SSS`:
 
 - `-raw.png`: the thermal image at its native resolution in the selected colour scheme and rotation.
+- `-raw.bin`: the
+  temperatures behind `-raw.png`, pixel for pixel in the same orientation. No header; unsigned
+  16 bit little endian, row by row, in 1/64 K (°C = value / 64 - 273.15). The size is the PNG's.
 - `-annotated.png`: the same enlarged 4x, with the crosshair, its temperature and a bar below with
   the colour scale. The bar's end temperatures are what the coldest and hottest colours stand for
   (the contrast-stretch range), not the absolute frame min/max.

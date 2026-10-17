@@ -29,6 +29,16 @@ class ThermalView(context: Context) : View(context) {
         setShadowLayer(3 * dp, 0f, 0f, Color.BLACK)
     }
     private val big = Paint(text).apply { textSize = 22 * dp }
+    private val marker = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val markerRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * dp
+    }
+    private val scaleRect = RectF()
+    private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private var scaleBitmap: Bitmap? = null
+    private var shownPalette: Palette? = null
     private val cross = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeWidth = 2 * dp
@@ -51,6 +61,14 @@ class ThermalView(context: Context) : View(context) {
 
     /** With the phone camera behind, the background is transparent and the image is blended. */
     var overlay = false
+        set(v) { field = v; invalidate() }
+
+    /** Tags on the hottest and coldest pixel. */
+    var showMarkers = false
+        set(v) { field = v; invalidate() }
+
+    /** Colour scale bar with its end temperatures. */
+    var showScale = false
         set(v) { field = v; invalidate() }
 
     var opacity = 0.5f
@@ -180,6 +198,44 @@ class ThermalView(context: Context) : View(context) {
             val lx = if (cx + b + 4 * dp + lw <= width) cx + b + 4 * dp else cx - b - 4 * dp - lw
             val ly = if (cy - b - big.textSize >= 0) cy - b else cy + b + big.textSize
             c.drawText(label, lx, ly, big)
+
+            if (showMarkers) {
+                for ((index, hot) in listOf(f.maxIndex to true, f.minIndex to false)) {
+                    // Same mapping as the crosshair: pixel centre as an offset from the frame centre, rotated.
+                    var mu = ((index % f.width + 0.5f) / f.width - 0.5f) * w
+                    var mv = ((index / f.width + 0.5f) / f.height - 0.5f) * h
+                    repeat(quarterTurns) { val t = mu; mu = -mv; mv = t }
+                    val x = mx + mu
+                    val y = my + mv
+                    marker.color = if (hot) 0xFFFF3B30.toInt() else 0xFF2979FF.toInt()
+                    c.drawCircle(x, y, 5 * dp, marker)
+                    c.drawCircle(x, y, 5 * dp, markerRing)
+                    val t = "%.1f".format(if (hot) f.maxC else f.minC)
+                    val tw = text.measureText(t)
+                    c.drawText(t, if (x + 9 * dp + tw <= width) x + 9 * dp else x - 9 * dp - tw, y + text.textSize / 3, text)
+                }
+            }
+
+            if (showScale) {
+                // Colour scale on the line above the min/max text; the right end stays clear of the buttons.
+                val lo = "%.1f °C".format(f.loC)
+                val hi = "%.1f °C".format(f.hiC)
+                val x1 = width - (safe?.right ?: 0) - 96 * dp
+                val barTop = bottom - 44 * dp
+                val barBottom = barTop + 12 * dp
+                val x0 = left + text.measureText(lo) + 8 * dp
+                val x2 = x1 - text.measureText(hi) - 8 * dp
+                val base = barBottom - (12 * dp - text.textSize * 0.7f) / 2
+                if (x2 > x0 + 20 * dp) {
+                    val sb = scaleBitmap?.takeIf { shownPalette === palette } ?: Bitmap.createBitmap(palette.lut, 256, 1, Bitmap.Config.ARGB_8888)
+                        .also { scaleBitmap = it; shownPalette = palette }
+                    scaleRect.set(x0, barTop, x2, barBottom)
+                    c.drawBitmap(sb, null, scaleRect, scalePaint)
+                    c.drawRect(scaleRect, markerRing)
+                    c.drawText(lo, left, base, text)
+                    c.drawText(hi, x1 - text.measureText(hi), base, text)
+                }
+            }
 
             c.drawText("min %.1f °C   max %.1f °C   %.1f fps".format(f.minC, f.maxC, f.fps), left, bottom, text)
         }

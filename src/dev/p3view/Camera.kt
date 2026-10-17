@@ -28,14 +28,19 @@ class DisplayFrame(
     val width: Int,
     val height: Int,
     val hfovDeg: Float,
-    /** Temperatures that levels 0 and 255 stand for, i.e. the range the colour scale covers. */
-    val loC: Float,
-    val hiC: Float,
+    /** Raw values that levels 0 and 255 stand for, i.e. the range the colour scale covers. */
+    val loRaw: Float,
+    val hiRaw: Float,
+    /** Indices into [thermal] of the coldest and hottest pixel. */
+    val minIndex: Int,
+    val maxIndex: Int,
     val minC: Float,
     val maxC: Float,
     val fps: Float,
 ) {
     fun celsiusAt(x: Int, y: Int): Float = rawToCelsius(thermal[y * width + x])
+    val loC: Float get() = rawToCelsius(loRaw.toInt())
+    val hiC: Float get() = rawToCelsius(hiRaw.toInt())
 }
 
 interface SessionListener {
@@ -56,6 +61,9 @@ class CameraSession(
     private val renderer = Renderer(model)
 
     fun shutter() { commands.offer(Commands.shutter) }
+
+    /** Fixes the colour scale to this raw range (lo, hi), or null to go back to automatic contrast. */
+    fun lockRange(range: FloatArray?) { renderer.fixed = range }
 
     fun shutdown() {
         running = false
@@ -224,22 +232,38 @@ class Renderer(private val model: Model) {
     private var init = false
     private val sorted = IntArray(model.pixels)
 
+    /** Raw (lo, hi) to use instead of the automatic range. */
+    @Volatile var fixed: FloatArray? = null
+
     fun render(thermal: IntArray, fps: Float): DisplayFrame {
         System.arraycopy(thermal, 0, sorted, 0, thermal.size)
         sorted.sort()
         val n = sorted.size
         val p1 = sorted[n / 100].toFloat()
         val p99 = sorted[n - 1 - n / 100].toFloat()
+        // The smoothed range keeps tracking while locked, so unlocking does not jump.
         if (init) { lo += (p1 - lo) * 0.2f; hi += (p99 - hi) * 0.2f } else { lo = p1; hi = p99; init = true }
         var a = lo
         var b = hi
-        val minSpan = 2 * 64f
-        if (b - a < minSpan) { val mid = (a + b) / 2; a = mid - minSpan / 2; b = mid + minSpan / 2 }
+        val range = fixed
+        if (range != null) {
+            a = range[0]
+            b = range[1]
+        } else {
+            val minSpan = 2 * 64f
+            if (b - a < minSpan) { val mid = (a + b) / 2; a = mid - minSpan / 2; b = mid + minSpan / 2 }
+        }
         val scale = 255f / (b - a)
         val levels = IntArray(n) { i -> ((thermal[i] - a) * scale).toInt().coerceIn(0, 255) }
+        var minIndex = 0
+        var maxIndex = 0
+        for (i in 1 until n) {
+            if (thermal[i] < thermal[minIndex]) minIndex = i
+            if (thermal[i] > thermal[maxIndex]) maxIndex = i
+        }
         return DisplayFrame(
             levels, thermal, model.width, model.height, model.hfov,
-            loC = rawToCelsius(a.toInt()), hiC = rawToCelsius(b.toInt()),
+            loRaw = a, hiRaw = b, minIndex = minIndex, maxIndex = maxIndex,
             minC = rawToCelsius(sorted[0]),
             maxC = rawToCelsius(sorted[n - 1]),
             fps = fps,

@@ -1,6 +1,6 @@
-// Snapshots land in the shared Pictures/p3view folder through MediaStore, so the gallery, the
-// Files app and share sheets see them. The UI thread only queues a job holding references to immutable frame data (and a
-// copy of the camera view); a worker thread renders and writes the files.
+// Snapshots land in Documents/p3view through MediaStore, so the Files app and share sheets see
+// them. The UI thread only queues a job holding references to immutable frame data (and a copy of
+// the camera view); a worker thread renders and writes the files.
 
 package dev.p3view
 
@@ -11,8 +11,12 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
+import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -22,8 +26,11 @@ private const val TAG = "p3view"
 private const val ANNOTATED_SCALE = 4
 private const val BAR_HEIGHT = 48
 
+/** Documents accepts any file type, so images and raw data can sit together. */
+private val FILES: Uri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+
 /** Folder below external storage root where snapshots are saved. */
-const val SNAPSHOT_DIR = "Pictures/p3view"
+const val SNAPSHOT_DIR = "Documents/p3view"
 
 class SnapshotJob(
     /** File name stem, `YYYYMMDD-HHMMSS-SSS`, from the moment of the button press. */
@@ -40,6 +47,8 @@ class SnapshotJob(
     val visible: Bitmap?,
     /** Where the thermal image sits on [visible]. */
     val thermalRect: RectF?,
+    /** Whether the hottest and coldest pixel tags were on screen. */
+    val markers: Boolean,
 )
 
 class SnapshotWriter(private val resolver: ContentResolver, private val onChange: () -> Unit, private val onError: (String) -> Unit) {
@@ -76,24 +85,38 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
     private fun write(job: SnapshotJob) {
         val f = job.frame
         var pixels = IntArray(f.levels.size) { job.lut[f.levels[it]] }
+        var thermal = f.thermal
         var w = f.width
         var h = f.height
-        var cx = job.crossX
-        var cy = job.crossY
+        // Points to carry through the rotation: crosshair, coldest pixel, hottest pixel.
+        val pts = intArrayOf(job.crossX, job.crossY, f.minIndex % w, f.minIndex / w, f.maxIndex % w, f.maxIndex / w)
         repeat(job.quarterTurns) {
             // Quarter turn clockwise: (x, y) -> (h - 1 - y, x), width and height swap.
-            val turned = IntArray(pixels.size)
-            for (y in 0 until h) for (x in 0 until w) turned[x * h + (h - 1 - y)] = pixels[y * w + x]
-            pixels = turned
-            val nx = h - 1 - cy
-            cy = cx
-            cx = nx
+            val turnedPixels = IntArray(pixels.size)
+            val turnedThermal = IntArray(pixels.size)
+            for (y in 0 until h) for (x in 0 until w) {
+                turnedPixels[x * h + (h - 1 - y)] = pixels[y * w + x]
+                turnedThermal[x * h + (h - 1 - y)] = thermal[y * w + x]
+            }
+            pixels = turnedPixels
+            thermal = turnedThermal
+            for (i in pts.indices step 2) {
+                val x = pts[i]
+                pts[i] = h - 1 - pts[i + 1]
+                pts[i + 1] = x
+            }
             val t = w; w = h; h = t
         }
         val raw = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
         save(job, "${job.stem}-raw.png", raw)
 
-        val annotated = annotate(raw, job, cx, cy)
+        // Radiometric data matching -raw.png pixel for pixel: unsigned 16 bit little endian, row by
+        // row, in 1/64 K (celsius = value / 64 - 273.15). No header; the size is the PNG's.
+        val data = ByteBuffer.allocate(thermal.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        for (v in thermal) data.putShort(v.toShort())
+        saveBytes(job, "${job.stem}-raw.bin", data.array())
+
+        val annotated = annotate(raw, job, pts)
         save(job, "${job.stem}-annotated.png", annotated)
         raw.recycle()
         annotated.recycle()
@@ -113,26 +136,38 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
 
     private fun save(job: SnapshotJob, name: String, bmp: Bitmap) {
         val jpeg = name.endsWith(".jpg")
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, name)
-            put(MediaStore.Images.Media.MIME_TYPE, if (jpeg) "image/jpeg" else "image/png")
-            put(MediaStore.Images.Media.RELATIVE_PATH, SNAPSHOT_DIR)
-            put(MediaStore.Images.Media.DATE_TAKEN, job.takenMs)
-            put(MediaStore.Images.Media.IS_PENDING, 1)
+        insert(job, name, if (jpeg) "image/jpeg" else "image/png", SNAPSHOT_DIR, FILES) {
+            check(bmp.compress(if (jpeg) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG, 95, it)) { "cannot encode $name" }
         }
-        val uri = checkNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)) { "cannot create $name" }
+    }
+
+
+    private fun saveBytes(job: SnapshotJob, name: String, bytes: ByteArray) {
+        insert(job, name, "application/octet-stream", SNAPSHOT_DIR, FILES) {
+            it.write(bytes)
+        }
+    }
+
+    private fun insert(job: SnapshotJob, name: String, mime: String, dir: String, collection: Uri, write: (OutputStream) -> Unit) {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, dir)
+            put(MediaStore.MediaColumns.DATE_TAKEN, job.takenMs)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = checkNotNull(resolver.insert(collection, values)) { "cannot create $name" }
         try {
-            val out = checkNotNull(resolver.openOutputStream(uri)) { "cannot write $name" }
-            out.use { check(bmp.compress(if (jpeg) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG, 95, it)) { "cannot encode $name" } }
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            checkNotNull(resolver.openOutputStream(uri)) { "cannot write $name" }.use(write)
+            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e
         }
     }
 
-    /** Enlarged image with crosshair and temperature, and a bar below showing the colour scale. */
-    private fun annotate(raw: Bitmap, job: SnapshotJob, px: Int, py: Int): Bitmap {
+    /** Enlarged image with crosshair, temperature and optional markers, and a bar below showing the colour scale. */
+    private fun annotate(raw: Bitmap, job: SnapshotJob, pts: IntArray): Bitmap {
         val k = ANNOTATED_SCALE
         val w = raw.width * k
         val h = raw.height * k
@@ -151,15 +186,29 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
             strokeWidth = 3f
             setShadowLayer(2f, 0f, 0f, Color.BLACK)
         }
-        val x = (px + 0.5f) * k
-        val y = (py + 0.5f) * k
+        val f = job.frame
+        if (job.markers) {
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+            val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2.5f }
+            for ((i, hot) in listOf(4 to true, 2 to false)) {
+                val mx = (pts[i] + 0.5f) * k
+                val my = (pts[i + 1] + 0.5f) * k
+                fill.color = if (hot) 0xFFFF3B30.toInt() else 0xFF2979FF.toInt()
+                c.drawCircle(mx, my, 8f, fill)
+                c.drawCircle(mx, my, 8f, ring)
+                val t = "%.1f".format(if (hot) f.maxC else f.minC)
+                val tw = text.measureText(t)
+                c.drawText(t, if (mx + 14 + tw <= w) mx + 14 else mx - 14 - tw, my + text.textSize / 3, text)
+            }
+        }
+        val x = (pts[0] + 0.5f) * k
+        val y = (pts[1] + 0.5f) * k
         val a = 8f
         val b = 22f
         c.drawLine(x - b, y, x - a, y, line)
         c.drawLine(x + a, y, x + b, y, line)
         c.drawLine(x, y - b, x, y - a, line)
         c.drawLine(x, y + a, x, y + b, line)
-        val f = job.frame
         val label = "%.1f °C".format(f.celsiusAt(job.crossX, job.crossY))
         val lw = text.measureText(label)
         val lx = if (x + b + 6 + lw <= w) x + b + 6 else x - b - 6 - lw

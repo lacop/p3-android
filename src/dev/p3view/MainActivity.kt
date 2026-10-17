@@ -25,6 +25,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -43,6 +44,8 @@ private const val PREF_PALETTE = "palette"
 private const val PREF_OVERLAY = "overlay"
 private const val PREF_LENS = "lens"
 private const val PREF_OPACITY = "opacity"
+private const val PREF_MARKERS = "markers"
+private const val PREF_SCALE = "scale"
 private const val PREF_ZOOM = "fovzoom_" // + lens key; zoom 1 = same field of view as the thermal image
 private const val PREF_PAN_X = "panx_"
 private const val PREF_PAN_Y = "pany_"
@@ -68,6 +71,8 @@ class MainActivity : Activity(), SessionListener {
     // Model, serial and firmware of the connected camera; written from the USB thread.
     @Volatile private var deviceInfo = ""
     private var refreshPanel: (() -> Unit)? = null
+    // Raw (lo, hi) the colour scale is locked to; not saved, as a range means little next launch.
+    private var lockedRange: FloatArray? = null
     private var session: CameraSession? = null
     private var sessionDevice: String? = null
     private var permissionPending = false
@@ -130,6 +135,9 @@ class MainActivity : Activity(), SessionListener {
                 prefs.edit().putInt(PREF_ROTATION, view.quarterTurns).apply()
             }
         }
+        val displayButton = IconButton(this, IconButton.Kind.DISPLAY).apply {
+            setOnClickListener { showReadoutPanel(this) }
+        }
         val shutterButton = IconButton(this, IconButton.Kind.SHUTTER).apply {
             setOnClickListener {
                 val s = session
@@ -156,6 +164,8 @@ class MainActivity : Activity(), SessionListener {
         lens?.let(::applyLensState)
         view.imageListener = { longPx, fov -> preview.matchTo(longPx, fov) }
         view.opacity = prefs.getFloat(PREF_OPACITY, 0.5f)
+        view.showMarkers = prefs.getBoolean(PREF_MARKERS, false)
+        view.showScale = prefs.getBoolean(PREF_SCALE, false)
         overlayButton = IconButton(this, IconButton.Kind.OVERLAY).apply {
             setOnClickListener {
                 if (lens == null) {
@@ -208,7 +218,7 @@ class MainActivity : Activity(), SessionListener {
                 insets
             }
         }
-        buttons = corner(tuneButton, overlayButton, paletteButton, rotateButton, shutterButton, top = true)
+        buttons = corner(tuneButton, overlayButton, paletteButton, rotateButton, displayButton, shutterButton, top = true)
         val galleryButton = IconButton(this, IconButton.Kind.GALLERY).apply {
             setOnClickListener { openSnapshotFolder() }
         }
@@ -308,7 +318,10 @@ class MainActivity : Activity(), SessionListener {
         }
         view.status = "Connecting"
         sessionDevice = device.deviceName
-        session = CameraSession(conn, device, Model.fromPid(device.productId)!!, this).also { it.start() }
+        session = CameraSession(conn, device, Model.fromPid(device.productId)!!, this).also {
+            it.lockRange(lockedRange)
+            it.start()
+        }
     }
 
     private fun zoomFor(l: Lens) = prefs.getFloat(PREF_ZOOM + l.key, 1f).coerceIn(ZOOM_MIN, ZOOM_MAX)
@@ -445,7 +458,7 @@ class MainActivity : Activity(), SessionListener {
         val (cx, cy) = view.crosshairPixel(f)
         val visible = if (overlayOn && preview.isAvailable) preview.bitmap else null
         snapshots.submit(
-            SnapshotJob(stem, System.currentTimeMillis(), f, view.palette.lut, view.quarterTurns, cx, cy, visible, visible?.let { view.displayedRect(f) })
+            SnapshotJob(stem, System.currentTimeMillis(), f, view.palette.lut, view.quarterTurns, cx, cy, visible, visible?.let { view.displayedRect(f) }, view.showMarkers)
         )
     }
 
@@ -469,6 +482,47 @@ class MainActivity : Activity(), SessionListener {
             this.text = deviceInfo.ifEmpty { "No camera connected" }.replace("  ", "\n")
         }
         PopupWindow(text, LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, true).showAsDropDown(anchor)
+    }
+
+    /** Toggles for the on-screen readouts. */
+    private fun showReadoutPanel(anchor: View) {
+        val dp = resources.displayMetrics.density
+        val pad = (12 * dp).toInt()
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, pad / 2)
+            setBackgroundColor(0xE6202020.toInt())
+        }
+        fun toggle(title: String, checked: Boolean, change: (CheckBox, Boolean) -> Unit) {
+            col.addView(CheckBox(this).apply {
+                text = title
+                setTextColor(Color.WHITE)
+                isChecked = checked
+                setOnCheckedChangeListener { box, on -> change(box as CheckBox, on) }
+            })
+        }
+        toggle("Hottest / coldest markers", view.showMarkers) { _, on ->
+            view.showMarkers = on
+            prefs.edit().putBoolean(PREF_MARKERS, on).apply()
+        }
+        toggle("Lock colour scale", lockedRange != null) { box, on ->
+            val frame = view.currentFrame()
+            if (on && frame == null) {
+                Toast.makeText(this, "No thermal image yet", Toast.LENGTH_SHORT).show()
+                box.isChecked = false
+            } else {
+                // Freeze the range in use right now; the session applies it to every later frame.
+                lockedRange = if (on) floatArrayOf(frame!!.loRaw, frame.hiRaw) else null
+                session?.lockRange(lockedRange)
+            }
+        }
+        toggle("Colour scale bar", view.showScale) { _, on ->
+            view.showScale = on
+            prefs.edit().putBoolean(PREF_SCALE, on).apply()
+        }
+        PopupWindow(col, LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, true).showAtLocation(
+            buttons, Gravity.TOP or Gravity.END, buttons.paddingRight, buttons.bottom + (4 * dp).toInt(),
+        )
     }
 
     private fun showPaletteMenu(anchor: View) {
