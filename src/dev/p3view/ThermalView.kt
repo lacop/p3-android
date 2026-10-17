@@ -144,7 +144,10 @@ class ThermalView(context: Context) : View(context) {
         val f = latest.get()
         // With a status overlay ("Tap to retry") a tap is a click for the activity instead.
         if (f == null || status.isNotEmpty()) return super.onTouchEvent(e)
-        if (e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_MOVE) {
+        // Only touches on the thermal image move the crosshair; a drag that leaves it keeps the last spot.
+        if ((e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_MOVE) &&
+            displayedRect(f).contains(e.x, e.y)
+        ) {
             // Undo the rotation, then convert to a pixel and back to the pixel's centre.
             var u = e.x - width / 2f
             var v = e.y - height / 2f
