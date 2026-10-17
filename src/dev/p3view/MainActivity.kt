@@ -46,6 +46,8 @@ private const val PREF_LENS = "lens"
 private const val PREF_OPACITY = "opacity"
 private const val PREF_MARKERS = "markers"
 private const val PREF_SCALE = "scale"
+private const val PREF_EDGES = "edges"
+private const val PREF_EDGE_SENS = "edge_sensitivity"
 private const val PREF_ZOOM = "fovzoom_" // + lens key; zoom 1 = same field of view as the thermal image
 private const val PREF_PAN_X = "panx_"
 private const val PREF_PAN_Y = "pany_"
@@ -72,6 +74,8 @@ class MainActivity : Activity(), SessionListener {
     private lateinit var snapshotCount: TextView
     private lateinit var pauseButton: IconButton
     private var paused = false
+    private lateinit var edgeProcessor: EdgeProcessor
+    private var edgesOn = false
     // Model, serial and firmware of the connected camera; written from the USB thread.
     @Volatile private var deviceInfo = ""
     private var refreshPanel: (() -> Unit)? = null
@@ -154,8 +158,26 @@ class MainActivity : Activity(), SessionListener {
         lens = lenses.firstOrNull { it.key == prefs.getString(PREF_LENS, null) }
             ?: lenses.firstOrNull { it.label == "1×" } ?: lenses.firstOrNull()
         overlayOn = prefs.getBoolean(PREF_OVERLAY, false) && lens != null
-        overlayCamera = OverlayCamera(this) { msg -> runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
+        edgesOn = prefs.getBoolean(PREF_EDGES, false)
+        edgeProcessor = EdgeProcessor { view.postInvalidateOnAnimation() }.apply {
+            sensitivity = prefs.getFloat(PREF_EDGE_SENS, 0.5f)
+        }
+        view.edgeBitmap = { edgeProcessor.bitmap }
+        view.edgePlacement = { m, w, h -> preview.contentMatrix(m, w, h) }
+        overlayCamera = OverlayCamera(
+            this,
+            onError = { msg -> runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } },
+            onEdgesUnsupported = {
+                runOnUiThread {
+                    edgesOn = false
+                    prefs.edit().putBoolean(PREF_EDGES, false).apply()
+                    Toast.makeText(this, "The phone cannot run the edge overlay with this camera", Toast.LENGTH_LONG).show()
+                    updateOverlay()
+                }
+            },
+        )
         preview = CameraPreview(this).apply {
+            onTransform = { view.invalidate() }
             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) = updateOverlay()
                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
@@ -368,7 +390,7 @@ class MainActivity : Activity(), SessionListener {
         val l = lens
         if (overlayOn && started && l != null && preview.isAvailable &&
             checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        ) overlayCamera.start(l, preview) else overlayCamera.stop()
+        ) overlayCamera.start(l, preview, if (edgesOn) edgeProcessor else null) else overlayCamera.stop()
     }
 
     /** Loads the saved zoom and pan of a lens into the preview. */
@@ -444,6 +466,18 @@ class MainActivity : Activity(), SessionListener {
         val setPanY = slider("Shift down", -PAN_MAX, PAN_MAX, pct, preview.panY, { preview.panY = it }, ::saveLensState)
         slider("Thermal opacity", 0f, 1f, { "${Math.round(it * 100)}%" }, view.opacity,
             { view.opacity = it }, { prefs.edit().putFloat(PREF_OPACITY, view.opacity).apply() })
+        col.addView(CheckBox(this).apply {
+            text = "Edge overlay"
+            setTextColor(Color.WHITE)
+            isChecked = edgesOn
+            setOnCheckedChangeListener { _, on ->
+                edgesOn = on
+                prefs.edit().putBoolean(PREF_EDGES, on).apply()
+                updateOverlay() // the edge output is part of the camera session, so it restarts
+            }
+        })
+        slider("Edge sensitivity", 0f, 1f, { "${Math.round(it * 100)}%" }, edgeProcessor.sensitivity,
+            { edgeProcessor.sensitivity = it }, { prefs.edit().putFloat(PREF_EDGE_SENS, edgeProcessor.sensitivity).apply() })
         refreshPanel = {
             setZoom(preview.zoom)
             setPanX(preview.panX)

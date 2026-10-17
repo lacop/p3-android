@@ -60,7 +60,8 @@ The screen shows the thermal image, the temperature at the crosshair and the fps
 Tap or drag on the image to move the crosshair. Buttons at the top right: colour scheme
 (popup menu), rotate 90°, shutter (NUC), and the phone-camera overlay toggle. With the overlay
 on, the rear camera shows behind the thermal image and an extra button opens the lens, zoom
-and opacity controls, which apply live. Zoom 1× scales the camera image to the same field of
+and opacity controls, which apply live, plus an **Edge overlay** option that draws outlines found in
+the camera view over the thermal image (with a sensitivity slider). Zoom 1× scales the camera image to the same field of
 view as the thermal lens (P3 40°, P1 52° horizontal), so the zoom and shift sliders only fine-tune.
 All settings are remembered (zoom and shift per lens).
 

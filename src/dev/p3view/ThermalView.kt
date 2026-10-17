@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -38,6 +39,12 @@ class ThermalView(context: Context) : View(context) {
     }
     private val scaleRect = RectF()
     private val markerPath = Path()
+    private val edgeMatrix = Matrix()
+    private val edgePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /** Edge outlines of the camera view, drawn over the thermal image; both null when off. */
+    var edgeBitmap: (() -> Bitmap?)? = null
+    var edgePlacement: ((Matrix, Float, Float) -> Boolean)? = null
     // Frame minimum and maximum next to the colour scale, tinted like their markers.
     private val minText = Paint(text).apply { color = 0xFF82B1FF.toInt() }
     private val maxText = Paint(text).apply { color = 0xFFFF8A80.toInt() }
@@ -188,6 +195,15 @@ class ThermalView(context: Context) : View(context) {
             dst.set(-w / 2, -h / 2, w / 2, h / 2)
             c.drawBitmap(bmp, null, dst, imagePaint)
             c.restore()
+
+            val edges = if (overlay) edgeBitmap?.invoke() else null
+            if (edges != null && edgePlacement?.invoke(edgeMatrix, edges.width.toFloat(), edges.height.toFloat()) == true) {
+                // Outlines only on the thermal image, placed exactly like the camera view behind it.
+                c.save()
+                c.clipRect(displayedRect(f))
+                c.drawBitmap(edges, edgeMatrix, edgePaint)
+                c.restore()
+            }
 
             // Crosshair: offset from the frame centre, rotated clockwise like the image.
             var u = (crossX - 0.5f) * w

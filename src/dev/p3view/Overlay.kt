@@ -4,6 +4,7 @@
 package dev.p3view
 
 import android.content.Context
+import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -81,7 +82,12 @@ private fun zoomLabel(ratio: Float): String {
 }
 
 /** Runs a preview session for one lens at a time. Safe to call start/stop repeatedly from the UI thread. */
-class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
+class OverlayCamera(
+    context: Context,
+    private val onError: (String) -> Unit,
+    /** The session could not be set up with the edge output; the caller should retry without it. */
+    private val onEdgesUnsupported: () -> Unit,
+) {
     private val mgr = context.getSystemService(CameraManager::class.java)
     private val thread = HandlerThread("p3-cam").apply { start() }
     private val handler = Handler(thread.looper)
@@ -92,6 +98,7 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
     private var surface: Surface? = null
     private var lens: Lens? = null
     private var texture: SurfaceTexture? = null
+    private var edges: EdgeProcessor? = null
     private var request: CaptureRequest? = null
     private var frames = 0
 
@@ -106,26 +113,33 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
         }
     }
 
-    @Synchronized fun start(lens: Lens, view: CameraPreview) {
+    /** Starts (or switches to) a preview; with [edges], also feeds camera frames to the edge detector. */
+    @Synchronized fun start(lens: Lens, view: CameraPreview, edges: EdgeProcessor?) {
         val tex = view.surfaceTexture ?: return
-        if (lens === this.lens && tex === texture) return
+        if (lens === this.lens && tex === texture && edges === this.edges) return
         stop()
         val my = ++gen
         this.lens = lens
         texture = tex
+        this.edges = edges
         try {
             val chars = mgr.getCameraCharacteristics(lens.physicalId ?: lens.logicalId)
             val size = previewSize(chars)
             tex.setDefaultBufferSize(size.width, size.height)
             view.configure(size.width, size.height, chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90, longSideFov(chars))
             val surface = Surface(tex).also { this.surface = it }
+            val sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val edgeSurface = edges?.let { e ->
+                val s = edgeSize(chars, size)
+                if (s == null) { Log.w(TAG, "no matching size for edges"); null } else e.open(s, sensor)
+            }
             mgr.openCamera(lens.logicalId, exec, object : CameraDevice.StateCallback() {
                 override fun onOpened(d: CameraDevice) {
                     synchronized(this@OverlayCamera) {
                         if (my != gen) { d.close(); return }
                         device = d
                     }
-                    createSession(d, surface, lens, my)
+                    createSession(d, surface, edgeSurface, lens, my)
                 }
                 override fun onDisconnected(d: CameraDevice) { d.close(); fail(my, "Phone camera disconnected") }
                 override fun onError(d: CameraDevice, error: Int) { d.close(); fail(my, "Phone camera error $error") }
@@ -159,6 +173,8 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
         frames = 0
         session?.close()
         device?.close()
+        edges?.close()
+        edges = null
         surface?.release()
         session = null
         device = null
@@ -167,11 +183,12 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
         texture = null
     }
 
-    private fun createSession(d: CameraDevice, surface: Surface, lens: Lens, my: Int) {
+    private fun createSession(d: CameraDevice, surface: Surface, edgeSurface: Surface?, lens: Lens, my: Int) {
         try {
-            val out = OutputConfiguration(surface)
-            lens.physicalId?.let { out.setPhysicalCameraId(it) }
-            val config = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, listOf(out), exec,
+            val outputs = listOfNotNull(surface, edgeSurface).map { s ->
+                OutputConfiguration(s).also { o -> lens.physicalId?.let { o.setPhysicalCameraId(it) } }
+            }
+            val config = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outputs, exec,
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(s: CameraCaptureSession) {
                         synchronized(this@OverlayCamera) {
@@ -181,6 +198,7 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
                         try {
                             val req = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                 addTarget(surface)
+                                edgeSurface?.let { addTarget(it) }
                                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                             }.build()
                             synchronized(this@OverlayCamera) {
@@ -192,7 +210,14 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
                             fail(my, "Phone camera preview failed: ${e.message}")
                         }
                     }
-                    override fun onConfigureFailed(s: CameraCaptureSession) = fail(my, "Cannot configure phone camera")
+                    override fun onConfigureFailed(s: CameraCaptureSession) {
+                        if (edgeSurface != null) {
+                            Log.w(TAG, "cannot configure phone camera with edge output")
+                            if (synchronized(this@OverlayCamera) { my == gen }) onEdgesUnsupported()
+                        } else {
+                            fail(my, "Cannot configure phone camera")
+                        }
+                    }
                 })
             d.createCaptureSession(config)
         } catch (e: Exception) {
@@ -212,6 +237,13 @@ class OverlayCamera(context: Context, private val onError: (String) -> Unit) {
         val size = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return 0f
         return Math.toDegrees(2 * atan(max(size.width, size.height) / (2 * f)).toDouble()).toFloat()
     }
+
+    /** A YUV size for edge detection: the same shape as the preview so both cover the same view, up to 800 px wide. */
+    private fun edgeSize(chars: CameraCharacteristics, preview: Size): Size? =
+        chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
+            .getOutputSizes(ImageFormat.YUV_420_888)
+            .filter { it.width <= 800 && it.width * preview.height == it.height * preview.width }
+            .maxByOrNull { it.width * it.height }
 
     /** Largest 4:3-ish size up to 1920x1440, which keeps the full sensor field of view. */
     private fun previewSize(chars: CameraCharacteristics): Size {
@@ -259,13 +291,29 @@ class CameraPreview(context: Context) : TextureView(context), DisplayManager.Dis
         applyTransform()
     }
 
+    /** Called after the preview's placement changed, so other layers drawn with it can follow. */
+    var onTransform: (() -> Unit)? = null
+
     fun applyTransform() {
+        if (!contentMatrix(matrix, width.toFloat(), height.toFloat())) return
+        setTransform(matrix)
+        onTransform?.invoke()
+    }
+
+    /**
+     * Matrix that places an image of the camera's shape on screen the way the preview is placed.
+     * The image is [srcW] x [srcH] in whatever resolution, upright for a natural-portrait display;
+     * the preview view itself shows the camera stretched over the view, so it passes its own size.
+     * Returns false while there is nothing to place yet.
+     */
+    fun contentMatrix(out: Matrix, srcW: Float, srcH: Float): Boolean {
         val vw = width.toFloat()
         val vh = height.toFloat()
-        if (bufW == 0 || vw == 0f) return
+        if (bufW == 0 || vw == 0f) return false
         // The system already rotates the buffer to the device's natural orientation and stretches
         // it over the view. Here the content is therefore (cw x ch), upright for a natural-portrait
-        // display; undo the stretch, counter-rotate for the current display rotation, scale, recentre.
+        // display; map the source to content pixels, counter-rotate for the current display
+        // rotation, scale, recentre.
         val turned = sensorOrientation % 180 == 90
         val cw = if (turned) bufH else bufW
         val ch = if (turned) bufW else bufH
@@ -280,12 +328,12 @@ class CameraPreview(context: Context) : TextureView(context), DisplayManager.Dis
             max(vw / dw, vh / dh) // unknown fields of view: centre-crop to fill
         }
         val k = base * zoom
-        matrix.setScale(cw / vw, ch / vh)
-        matrix.postTranslate(-cw / 2f, -ch / 2f)
-        matrix.postRotate(rot.toFloat())
-        matrix.postScale(k, k)
-        matrix.postTranslate(vw / 2 + panX * irLong, vh / 2 + panY * irLong)
-        setTransform(matrix)
+        out.setScale(cw / srcW, ch / srcH)
+        out.postTranslate(-cw / 2f, -ch / 2f)
+        out.postRotate(rot.toFloat())
+        out.postScale(k, k)
+        out.postTranslate(vw / 2 + panX * irLong, vh / 2 + panY * irLong)
+        return true
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
