@@ -437,8 +437,8 @@ class MainActivity : Activity(), SessionListener {
             }
         }
 
-        val pct = { v: Float -> "%+.1f%%".format(v * 100) }
-        val setZoom = slider("Zoom", ZOOM_MIN, ZOOM_MAX, { "%.3f×".format(it) }, preview.zoom,
+        val pct = { v: Float -> fmt("%+.1f%%", v * 100) }
+        val setZoom = slider("Zoom", ZOOM_MIN, ZOOM_MAX, { fmt("%.3f×", it) }, preview.zoom,
             { preview.zoom = it }, ::saveLensState)
         val setPanX = slider("Shift right", -PAN_MAX, PAN_MAX, pct, preview.panX, { preview.panX = it }, ::saveLensState)
         val setPanY = slider("Shift down", -PAN_MAX, PAN_MAX, pct, preview.panY, { preview.panY = it }, ::saveLensState)

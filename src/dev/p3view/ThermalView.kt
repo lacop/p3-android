@@ -202,7 +202,7 @@ class ThermalView(context: Context) : View(context) {
             c.drawLine(cx, cy - b, cx, cy - a, cross)
             c.drawLine(cx, cy + a, cx, cy + b, cross)
             val (px, py) = crosshairPixel(f)
-            val label = "%.1f °C".format(f.celsiusAt(px, py))
+            val label = fmt("%.1f °C", f.celsiusAt(px, py))
             val lw = big.measureText(label)
             val lx = if (cx + b + 4 * dp + lw <= width) cx + b + 4 * dp else cx - b - 4 * dp - lw
             val ly = if (cy - b - big.textSize >= 0) cy - b else cy + b + big.textSize
@@ -229,7 +229,7 @@ class ThermalView(context: Context) : View(context) {
                     marker.color = if (hot) 0xFFFF3B30.toInt() else 0xFF2979FF.toInt()
                     c.drawPath(markerPath, marker)
                     c.drawPath(markerPath, markerRing)
-                    val t = "%.1f".format(if (hot) f.maxC else f.minC)
+                    val t = fmt("%.1f", if (hot) f.maxC else f.minC)
                     val tw = text.measureText(t)
                     c.drawText(t, if (x + 9 * dp + tw <= width) x + 9 * dp else x - 9 * dp - tw, y + text.textSize / 3, text)
                 }
@@ -239,10 +239,10 @@ class ThermalView(context: Context) : View(context) {
                 // Just below the thermal image, centred:  min | scale low [colour bar] scale high | max
                 // The scale ends are the 1st and 99th percentile the colours cover; min and max are the
                 // real frame extremes. When the image leaves no room it sits above the fps line.
-                val minT = "%.1f".format(f.minC)
-                val maxT = "%.1f".format(f.maxC)
-                val lo = "%.1f".format(f.loC)
-                val hi = "%.1f".format(f.hiC)
+                val minT = fmt("%.1f", f.minC)
+                val maxT = fmt("%.1f", f.maxC)
+                val lo = fmt("%.1f", f.loC)
+                val hi = fmt("%.1f", f.hiC)
                 val img = displayedRect(f)
                 val slot = listOf(minT, maxT, lo, hi).maxOf { text.measureText(it) } + 6 * dp
                 val edge = 10 * dp
@@ -264,7 +264,7 @@ class ThermalView(context: Context) : View(context) {
                 }
             }
 
-            c.drawText("%.1f fps".format(f.fps), left, bottom, text)
+            c.drawText(fmt("%.1f fps", f.fps), left, bottom, text)
         }
         if (status.isNotEmpty()) {
             val lines = status.split('\n')

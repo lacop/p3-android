@@ -204,7 +204,7 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
                 }
                 c.drawPath(tri, fill)
                 c.drawPath(tri, ring)
-                val t = "%.1f".format(if (hot) f.maxC else f.minC)
+                val t = fmt("%.1f", if (hot) f.maxC else f.minC)
                 val tw = text.measureText(t)
                 c.drawText(t, if (mx + 14 + tw <= w) mx + 14 else mx - 14 - tw, my + text.textSize / 3, text)
             }
@@ -217,7 +217,7 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
         c.drawLine(x + a, y, x + b, y, line)
         c.drawLine(x, y - b, x, y - a, line)
         c.drawLine(x, y + a, x, y + b, line)
-        val label = "%.1f °C".format(f.celsiusAt(job.crossX, job.crossY))
+        val label = fmt("%.1f °C", f.celsiusAt(job.crossX, job.crossY))
         val lw = text.measureText(label)
         val lx = if (x + b + 6 + lw <= w) x + b + 6 else x - b - 6 - lw
         val ly = if (y - b - text.textSize >= 0) y - b else y + b + text.textSize
@@ -225,8 +225,8 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
 
         // Bar: low end temperature, the palette from cold to hot, high end temperature. The ends are
         // what levels 0 and 255 stand for, so a pixel's temperature can be read off its colour.
-        val lo = "%.1f °C".format(f.loC)
-        val hi = "%.1f °C".format(f.hiC)
+        val lo = fmt("%.1f °C", f.loC)
+        val hi = fmt("%.1f °C", f.hiC)
         val stripLeft = 12f + text.measureText(lo) + 12f
         val stripRight = w - 12f - text.measureText(hi) - 12f
         val mid = h + BAR_HEIGHT / 2f

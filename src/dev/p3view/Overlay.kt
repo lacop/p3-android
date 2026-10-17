@@ -76,8 +76,8 @@ fun findLenses(mgr: CameraManager): List<Lens> {
 /** Snaps to the usual zoom stops when close (reported sensor sizes are only roughly right). */
 private fun zoomLabel(ratio: Float): String {
     val stop = listOf(0.5f, 1f, 2f, 3f, 5f, 10f).minByOrNull { abs(ln(ratio / it)) }!!
-    return if (abs(ln(ratio / stop)) < 0.2f) "%s×".format(if (stop < 1f) "%.1f".format(stop) else "%.0f".format(stop))
-    else "%.1f×".format(ratio)
+    return if (abs(ln(ratio / stop)) < 0.2f) fmt("%s×", if (stop < 1f) fmt("%.1f", stop) else fmt("%.0f", stop))
+    else fmt("%.1f×", ratio)
 }
 
 /** Runs a preview session for one lens at a time. Safe to call start/stop repeatedly from the UI thread. */
