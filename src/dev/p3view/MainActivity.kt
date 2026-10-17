@@ -3,6 +3,7 @@ package dev.p3view
 import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -15,6 +16,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.Gravity
 import android.view.TextureView
 import android.view.View
@@ -31,6 +33,8 @@ import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import android.widget.PopupMenu
 
 private const val ACTION_USB_PERMISSION = "dev.p3view.USB_PERMISSION"
@@ -59,6 +63,10 @@ class MainActivity : Activity(), SessionListener {
     private var lens: Lens? = null
     private var overlayOn = false
     private var started = false
+    private lateinit var snapshots: SnapshotWriter
+    private lateinit var snapshotCount: TextView
+    // Model, serial and firmware of the connected camera; written from the USB thread.
+    @Volatile private var deviceInfo = ""
     private var refreshPanel: (() -> Unit)? = null
     private var session: CameraSession? = null
     private var sessionDevice: String? = null
@@ -87,7 +95,7 @@ class MainActivity : Activity(), SessionListener {
                     if (dev != null && dev.deviceName == sessionDevice) {
                         stopSession()
                         view.clearFrame()
-                        view.info = ""
+                        deviceInfo = ""
                         view.status = "Camera unplugged"
                     }
                 }
@@ -102,7 +110,6 @@ class MainActivity : Activity(), SessionListener {
         view = ThermalView(this).apply {
             quarterTurns = prefs.getInt(PREF_ROTATION, 0)
             palette = Palette.byName(prefs.getString(PREF_PALETTE, null))
-            topReserve = 36 * resources.displayMetrics.density
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.insetsController?.apply {
@@ -166,9 +173,28 @@ class MainActivity : Activity(), SessionListener {
         tuneButton = IconButton(this, IconButton.Kind.TUNE).apply {
             setOnClickListener { showOverlayPanel() }
         }
-        buttons = LinearLayout(this).apply {
+        val infoButton = IconButton(this, IconButton.Kind.INFO).apply {
+            setOnClickListener { showInfo(this) }
+        }
+        snapshots = SnapshotWriter(
+            contentResolver,
+            onChange = { runOnUiThread { showSnapshotCount() } },
+            onError = { msg -> runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } },
+        )
+        snapshotCount = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setShadowLayer(3 * dp, 0f, 0f, Color.BLACK)
+            textSize = 20f
+            visibility = View.GONE
+        }
+        val snapshotButton = IconButton(this, IconButton.Kind.SNAPSHOT).apply {
+            setOnClickListener { takeSnapshot() }
+        }
+
+        fun corner(vararg children: View, top: Boolean) = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            for (b in listOf(tuneButton, overlayButton, paletteButton, rotateButton, shutterButton)) {
+            gravity = Gravity.CENTER_VERTICAL
+            for (b in children) {
                 addView(b, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                     marginStart = (8 * dp).toInt()
                 })
@@ -177,15 +203,24 @@ class MainActivity : Activity(), SessionListener {
                 val safe = insets.getInsetsIgnoringVisibility(
                     WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
                 )
-                v.setPadding(safe.left, safe.top + (8 * dp).toInt(), safe.right + (8 * dp).toInt(), 0)
+                val m = (8 * dp).toInt()
+                v.setPadding(safe.left + m, if (top) safe.top + m else 0, safe.right + m, if (top) 0 else safe.bottom + m)
                 insets
             }
         }
+        buttons = corner(tuneButton, overlayButton, paletteButton, rotateButton, shutterButton, top = true)
+        val galleryButton = IconButton(this, IconButton.Kind.GALLERY).apply {
+            setOnClickListener { openSnapshotFolder() }
+        }
+        val infoCorner = corner(infoButton, galleryButton, top = true)
+        val snapshotCorner = corner(snapshotCount, snapshotButton, top = false)
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(preview, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(view, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(buttons, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
+            addView(infoCorner, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+            addView(snapshotCorner, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
         })
         val filter = IntentFilter().apply {
             addAction(ACTION_USB_PERMISSION)
@@ -393,6 +428,49 @@ class MainActivity : Activity(), SessionListener {
 
     private fun refresh() { refreshPanel?.invoke() }
 
+    private fun showSnapshotCount() {
+        val n = snapshots.count
+        snapshotCount.text = n.toString()
+        snapshotCount.visibility = if (n > 0) View.VISIBLE else View.GONE
+    }
+
+    /** Queues a snapshot. Only references and one bitmap copy are taken here; the worker does the rest. */
+    private fun takeSnapshot() {
+        val f = view.currentFrame()
+        if (f == null) {
+            Toast.makeText(this, "No thermal image yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val stem = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"))
+        val (cx, cy) = view.crosshairPixel(f)
+        val visible = if (overlayOn && preview.isAvailable) preview.bitmap else null
+        snapshots.submit(
+            SnapshotJob(stem, System.currentTimeMillis(), f, view.palette.lut, view.quarterTurns, cx, cy, visible, visible?.let { view.displayedRect(f) })
+        )
+    }
+
+    /** Opens the snapshot folder in the system file browser. */
+    private fun openSnapshotFolder() {
+        val dir = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$SNAPSHOT_DIR")
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(dir, DocumentsContract.Document.MIME_TYPE_DIR))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "No file browser found. Snapshots are in $SNAPSHOT_DIR", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showInfo(anchor: View) {
+        val dp = resources.displayMetrics.density
+        val text = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
+            setBackgroundColor(0xE6202020.toInt())
+            this.text = deviceInfo.ifEmpty { "No camera connected" }.replace("  ", "\n")
+        }
+        PopupWindow(text, LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, true).showAsDropDown(anchor)
+    }
+
     private fun showPaletteMenu(anchor: View) {
         val menu = PopupMenu(this, anchor)
         Palette.ALL.forEachIndexed { i, p ->
@@ -417,7 +495,7 @@ class MainActivity : Activity(), SessionListener {
 
     // SessionListener, called on the USB thread
     override fun onStatus(text: String) { view.status = text }
-    override fun onInfo(text: String) { view.info = text }
+    override fun onInfo(text: String) { deviceInfo = text }
     override fun onFrame(frame: DisplayFrame) { view.submit(frame) }
     override fun onError(text: String) { view.status = "$text\nTap to retry" }
 }

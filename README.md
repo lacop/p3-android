@@ -50,6 +50,22 @@ All settings are remembered (zoom and shift per lens).
 After an error, tap the screen to retry. The stream stops when the app leaves the
 foreground and restarts when it returns.
 
+The **?** button at the top left shows the camera model, serial number and firmware.
+
+The camera button at the bottom right saves a snapshot to `Pictures/p3view` on the phone, so the
+gallery, the Files app and share sheets see it. The picture button next to **?** opens that folder.
+Files are named after the local time of the press, `YYYYMMDD-HHMMSS-SSS`:
+
+- `-raw.png`: the thermal image at its native resolution in the selected colour scheme and rotation.
+- `-annotated.png`: the same enlarged 4x, with the crosshair, its temperature and a bar below with
+  the colour scale. The bar's end temperatures are what the coldest and hottest colours stand for
+  (the contrast-stretch range), not the absolute frame min/max.
+- `-visible.jpg`: only with the camera overlay on; the phone camera view as shown, with a red
+  rectangle where the thermal image sits.
+
+Files are rendered and written on a background thread. A number next to the button shows how
+many snapshots are still waiting.
+
 Logs: `adb logcat -s p3view`.
 
 ## How it works
@@ -61,6 +77,7 @@ src/dev/p3view/ThermalView.kt  draws the frame scaled, rotated, palette, crossha
 src/dev/p3view/Palette.kt      colour schemes
 src/dev/p3view/IconButton.kt   canvas-drawn round buttons
 src/dev/p3view/Overlay.kt      rear camera lenses, camera2 preview session, zoomable preview view
+src/dev/p3view/Snapshot.kt     snapshot queue and background writer (raw, annotated, visible)
 src/dev/p3view/MainActivity.kt permissions, attach/detach, lifecycle
 test/ProtocolTest.kt           JVM tests for Protocol.kt, run by build.sh
 build.sh                       aapt2 -> kotlinc -> d8 -> zip -> zipalign -> apksigner

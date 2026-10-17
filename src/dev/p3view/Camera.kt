@@ -28,6 +28,9 @@ class DisplayFrame(
     val width: Int,
     val height: Int,
     val hfovDeg: Float,
+    /** Temperatures that levels 0 and 255 stand for, i.e. the range the colour scale covers. */
+    val loC: Float,
+    val hiC: Float,
     val minC: Float,
     val maxC: Float,
     val fps: Float,
@@ -236,6 +239,7 @@ class Renderer(private val model: Model) {
         val levels = IntArray(n) { i -> ((thermal[i] - a) * scale).toInt().coerceIn(0, 255) }
         return DisplayFrame(
             levels, thermal, model.width, model.height, model.hfov,
+            loC = rawToCelsius(a.toInt()), hiC = rawToCelsius(b.toInt()),
             minC = rawToCelsius(sorted[0]),
             maxC = rawToCelsius(sorted[n - 1]),
             fps = fps,

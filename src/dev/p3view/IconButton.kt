@@ -16,7 +16,7 @@ import kotlin.math.sqrt
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
 class IconButton(context: Context, private val kind: Kind) : View(context) {
-    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE }
+    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE, INFO, SNAPSHOT, GALLERY }
 
     private val dp = resources.displayMetrics.density
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -28,6 +28,11 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val swatch = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
     private val box = RectF()
     private var colors = IntArray(0)
 
@@ -43,6 +48,9 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
             Kind.PALETTE -> "Colour scheme"
             Kind.OVERLAY -> "Phone camera overlay"
             Kind.TUNE -> "Overlay settings"
+            Kind.INFO -> "Camera info"
+            Kind.SNAPSHOT -> "Save snapshot"
+            Kind.GALLERY -> "Open snapshot folder"
         }
     }
 
@@ -121,6 +129,38 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
                 c.drawPath(head, fill)
             }
             Kind.OVERLAY -> {
+                // Two stacked squares: the thermal layer over the camera layer.
+                val s = 10 * dp
+                val o = 3.5f * dp
+                box.set(cx - s / 2 - o, cy - s / 2 - o, cx + s / 2 - o, cy + s / 2 - o)
+                c.drawRoundRect(box, 2 * dp, 2 * dp, line.apply { strokeWidth = 1.75f * dp })
+                box.offset(2 * o, 2 * o)
+                c.drawRoundRect(box, 2 * dp, 2 * dp, fill)
+                line.strokeWidth = 2 * dp
+            }
+            Kind.GALLERY -> {
+                // Picture frame with a sun and two hills.
+                val hw = 11 * dp
+                val hh = 8.5f * dp
+                box.set(cx - hw, cy - hh, cx + hw, cy + hh)
+                c.drawRoundRect(box, 3 * dp, 3 * dp, line.apply { strokeWidth = 1.75f * dp })
+                line.strokeWidth = 2 * dp
+                c.drawCircle(cx + 4.5f * dp, cy - 2.5f * dp, 1.8f * dp, fill)
+                val hills = Path().apply {
+                    moveTo(cx - hw + 1.5f * dp, cy + hh - 1.5f * dp)
+                    lineTo(cx - 3.5f * dp, cy - 0.5f * dp)
+                    lineTo(cx + 0.5f * dp, cy + 4 * dp)
+                    lineTo(cx + 3 * dp, cy + 1.5f * dp)
+                    lineTo(cx + hw - 1.5f * dp, cy + hh - 1.5f * dp)
+                    close()
+                }
+                c.drawPath(hills, fill)
+            }
+            Kind.INFO -> {
+                glyph.textSize = 24 * dp
+                c.drawText("?", cx, cy - (glyph.ascent() + glyph.descent()) / 2, glyph)
+            }
+            Kind.SNAPSHOT -> {
                 val hw = 11 * dp
                 val hh = 7.5f * dp
                 box.set(cx - hw, cy - hh + 1.5f * dp, cx + hw, cy + hh + 1.5f * dp)

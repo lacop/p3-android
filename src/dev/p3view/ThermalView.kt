@@ -41,8 +41,6 @@ class ThermalView(context: Context) : View(context) {
 
     @Volatile var status: String = ""
         set(v) { field = v; postInvalidate() }
-    @Volatile var info: String = ""
-        set(v) { field = v; postInvalidate() }
 
     /** Clockwise quarter turns, 0..3. */
     var quarterTurns = 0
@@ -58,12 +56,25 @@ class ThermalView(context: Context) : View(context) {
     var opacity = 0.5f
         set(v) { field = v; invalidate() }
 
-    /** Space kept free at the top for the button row. */
-    var topReserve = 0f
-
     fun submit(frame: DisplayFrame) {
         latest.set(frame)
         postInvalidateOnAnimation()
+    }
+
+    /** The frame currently on screen, if any. */
+    fun currentFrame(): DisplayFrame? = latest.get()
+
+    /** Crosshair position as a pixel of the unrotated frame. */
+    fun crosshairPixel(f: DisplayFrame): Pair<Int, Int> =
+        Pair((crossX * f.width).toInt().coerceIn(0, f.width - 1), (crossY * f.height).toInt().coerceIn(0, f.height - 1))
+
+    /** Where the thermal image is drawn, in view coordinates. */
+    fun displayedRect(f: DisplayFrame): RectF {
+        val s = scaleFor(f.width, f.height)
+        val odd = quarterTurns % 2 == 1
+        val w = (if (odd) f.height else f.width) * s
+        val h = (if (odd) f.width else f.height) * s
+        return RectF((width - w) / 2, (height - h) / 2, (width + w) / 2, (height + h) / 2)
     }
 
     fun clearFrame() {
@@ -123,8 +134,6 @@ class ThermalView(context: Context) : View(context) {
             WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
         )
         val left = (safe?.left ?: 0) + 16 * dp
-        val right = width - (safe?.right ?: 0) - 16 * dp
-        val top = (safe?.top ?: 0) + 16 * dp
         val bottom = height - (safe?.bottom ?: 0) - 16 * dp
 
         val f = latest.get()
@@ -165,19 +174,15 @@ class ThermalView(context: Context) : View(context) {
             c.drawLine(cx + a, cy, cx + b, cy, cross)
             c.drawLine(cx, cy - b, cx, cy - a, cross)
             c.drawLine(cx, cy + a, cx, cy + b, cross)
-            val px = (crossX * f.width).toInt().coerceIn(0, f.width - 1)
-            val py = (crossY * f.height).toInt().coerceIn(0, f.height - 1)
+            val (px, py) = crosshairPixel(f)
             val label = "%.1f °C".format(f.celsiusAt(px, py))
             val lw = big.measureText(label)
             val lx = if (cx + b + 4 * dp + lw <= width) cx + b + 4 * dp else cx - b - 4 * dp - lw
             val ly = if (cy - b - big.textSize >= 0) cy - b else cy + b + big.textSize
             c.drawText(label, lx, ly, big)
 
-            c.drawText("min %.1f °C   max %.1f °C".format(f.minC, f.maxC), left, bottom, text)
-            val fps = "%.1f fps".format(f.fps)
-            c.drawText(fps, right - text.measureText(fps), bottom, text)
+            c.drawText("min %.1f °C   max %.1f °C   %.1f fps".format(f.minC, f.maxC, f.fps), left, bottom, text)
         }
-        if (info.isNotEmpty()) c.drawText(info, left, top + topReserve + text.textSize, text)
         if (status.isNotEmpty()) {
             val lines = status.split('\n')
             var y = height / 2f - (lines.size - 1) * big.textSize * 0.7f
