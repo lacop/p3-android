@@ -46,6 +46,7 @@ private const val PREF_LENS = "lens"
 private const val PREF_OPACITY = "opacity"
 private const val PREF_MARKERS = "markers"
 private const val PREF_SCALE = "scale"
+private const val PREF_HISTOGRAM = "histogram"
 private const val PREF_EDGES = "edges"
 private const val PREF_EDGE_SENS = "edge_sensitivity"
 private const val PREF_ZOOM = "fovzoom_" // + lens key; zoom 1 = same field of view as the thermal image
@@ -200,6 +201,7 @@ class MainActivity : Activity(), SessionListener {
         view.opacity = prefs.getFloat(PREF_OPACITY, 0.5f)
         view.showMarkers = prefs.getBoolean(PREF_MARKERS, false)
         view.showScale = prefs.getBoolean(PREF_SCALE, true)
+        view.showHistogram = prefs.getBoolean(PREF_HISTOGRAM, false)
         overlayButton = IconButton(this, IconButton.Kind.OVERLAY).apply {
             setOnClickListener {
                 if (lens == null) {
@@ -599,6 +601,10 @@ class MainActivity : Activity(), SessionListener {
         toggle("Colour scale bar", view.showScale) { _, on ->
             view.showScale = on
             prefs.edit().putBoolean(PREF_SCALE, on).apply()
+        }
+        toggle("Histogram", view.showHistogram) { _, on ->
+            view.showHistogram = on
+            prefs.edit().putBoolean(PREF_HISTOGRAM, on).apply()
         }
         PopupWindow(col, LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, true).showAtLocation(
             buttons, Gravity.TOP or Gravity.END, buttons.paddingRight, buttons.bottom + (4 * dp).toInt(),

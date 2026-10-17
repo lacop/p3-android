@@ -71,6 +71,7 @@ The thermometer button (between rotate and shutter) opens toggles for readouts:
 - **Lock colour scale**: freezes the current colour range, so colours mean the same temperature
   from frame to frame and between snapshots. Not remembered across launches.
 - **Colour scale bar** (on by default): under the image, `min | scale low [colour bar] scale high | max`. The scale ends are the 1st and 99th percentile the colours cover, so the real hottest and coldest pixels can lie outside them.
+- **Histogram**: a percentile plot below the scale bar, white on black, 80% of the screen width. The pixels are sorted by temperature and split into one equal bucket per screen pixel; each column grows up from the bottom in proportion to its bucket's temperature between the frame minimum and maximum, so it rises left to right and flat stretches mean many pixels at the same temperature.
 The marker and scale bar settings are remembered.
 After an error, tap the screen to retry. The stream stops when the app leaves the
 foreground and restarts when it returns.

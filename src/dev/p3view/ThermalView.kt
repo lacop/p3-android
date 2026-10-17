@@ -83,6 +83,10 @@ class ThermalView(context: Context) : View(context) {
     var showScale = false
         set(v) { field = v; invalidate() }
 
+    /** Histogram of pixel temperatures under the colour scale bar. */
+    var showHistogram = false
+        set(v) { field = v; invalidate() }
+
     var opacity = 0.5f
         set(v) { field = v; invalidate() }
 
@@ -102,6 +106,50 @@ class ThermalView(context: Context) : View(context) {
         notice = text
         invalidate()
         postDelayed({ if (notice == text) { notice = ""; invalidate() } }, ms)
+    }
+
+    private var histFrame: DisplayFrame? = null
+    private var histHeights = FloatArray(0)
+    private val histPaint = Paint()
+
+    /**
+     * Percentile plot of the pixel temperatures: 80% of the view width, one column per screen pixel.
+     * The pixels, ordered by temperature, are split into that many equal buckets; column i is the
+     * i-th bucket (left = coldest) and grows up from the bottom of the box in proportion to its
+     * temperature between the frame minimum (zero) and maximum (full height), independent of the colour range.
+     */
+    private fun drawHistogram(c: Canvas, f: DisplayFrame, top: Float, height: Float) {
+        val n = (0.8f * width).toInt()
+        if (n < 2) return
+        if (f !== histFrame || n != histHeights.size) computeHistogram(f, n)
+        val x0 = (width - n) / 2
+        histPaint.color = Color.BLACK
+        c.drawRect(x0.toFloat(), top, (x0 + n).toFloat(), top + height, histPaint)
+        histPaint.color = Color.WHITE
+        for (i in 0 until n) {
+            val h = height * histHeights[i]
+            if (h >= 0.5f) c.drawRect(x0 + i.toFloat(), top + height - h, x0 + i + 1f, top + height, histPaint)
+        }
+    }
+
+    private fun computeHistogram(f: DisplayFrame, n: Int) {
+        val minRaw = f.thermal[f.minIndex]
+        val maxRaw = f.thermal[f.maxIndex]
+        // Counting sort: how many pixels per raw value (1/64 K), then walk the cumulative count.
+        val counts = IntArray(maxRaw - minRaw + 1)
+        for (r in f.thermal) counts[r - minRaw]++
+        val total = f.thermal.size
+        val span = maxOf(maxRaw - minRaw, 1).toFloat()
+        val heights = FloatArray(n)
+        var value = 0
+        var cum = counts[0]
+        for (i in 0 until n) {
+            val rank = ((i + 0.5f) / n * total).toInt() // middle pixel of this bucket, in temperature order
+            while (cum <= rank && value < counts.size - 1) { value++; cum += counts[value] }
+            heights[i] = value / span
+        }
+        histFrame = f
+        histHeights = heights
     }
 
     /** The frame currently on screen, if any. */
@@ -263,10 +311,11 @@ class ThermalView(context: Context) : View(context) {
                 }
             }
 
-            if (showScale) {
+            if (showScale || showHistogram) {
                 // Just below the thermal image, centred:  min | scale low [colour bar] scale high | max
                 // The scale ends are the 1st and 99th percentile the colours cover; min and max are the
-                // real frame extremes. When the image leaves no room it sits above the fps line.
+                // real frame extremes. The histogram sits under the bar. When the image leaves no
+                // room, the whole stack moves up to sit above the fps line.
                 val minT = fmt("%.1f", f.minC)
                 val maxT = fmt("%.1f", f.maxC)
                 val lo = fmt("%.1f", f.loC)
@@ -276,10 +325,12 @@ class ThermalView(context: Context) : View(context) {
                 val edge = 10 * dp
                 val x0 = img.left + edge + 2 * slot
                 val x1 = img.right - edge - 2 * slot
-                val barBottom = minOf(img.bottom + 6 * dp + 12 * dp, bottom - 22 * dp)
+                val histH = if (showHistogram) 72 * dp else 0f
+                val histGap = if (showHistogram) 16 * dp else 0f
+                val barBottom = minOf(img.bottom + 6 * dp + 12 * dp + histGap + histH, bottom - 22 * dp) - histGap - histH
                 val barTop = barBottom - 12 * dp
                 val base = barBottom - (12 * dp - text.textSize * 0.7f) / 2
-                if (x1 > x0 + 30 * dp) {
+                if (showScale && x1 > x0 + 30 * dp) {
                     val sb = scaleBitmap?.takeIf { shownPalette === palette } ?: Bitmap.createBitmap(palette.lut, 256, 1, Bitmap.Config.ARGB_8888)
                         .also { scaleBitmap = it; shownPalette = palette }
                     scaleRect.set(x0, barTop, x1, barBottom)
@@ -290,6 +341,7 @@ class ThermalView(context: Context) : View(context) {
                     c.drawText(hi, x1 + 6 * dp, base, text)
                     c.drawText(maxT, img.right - edge - maxText.measureText(maxT), base, maxText)
                 }
+                if (showHistogram) drawHistogram(c, f, barBottom + histGap, histH)
             }
 
             c.drawText(fmt("%.1f fps", f.fps), left, bottom, text)
