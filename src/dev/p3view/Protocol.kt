@@ -23,13 +23,14 @@ object P3 {
     const val STATUS_BUSY = 1
 }
 
-class Model(val name: String, val pid: Int, val width: Int, val height: Int) {
+/** [hfov] is the lens horizontal field of view in degrees, from the vendor spec sheets. */
+class Model(val name: String, val pid: Int, val width: Int, val height: Int, val hfov: Float) {
     /** IR rows + 2 metadata rows + thermal rows, 16 bits per pixel, markers excluded. */
     val frameSize: Int get() = 2 * (2 * height + 2) * width
     val pixels: Int get() = width * height
 
     companion object {
-        val ALL = listOf(Model("P3", 0x45a2, 256, 192), Model("P1", 0x45c2, 160, 120))
+        val ALL = listOf(Model("P3", 0x45a2, 256, 192, 40f), Model("P1", 0x45c2, 160, 120, 52f))
         fun fromPid(pid: Int): Model? = ALL.firstOrNull { it.pid == pid }
     }
 }

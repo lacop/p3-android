@@ -27,6 +27,7 @@ class DisplayFrame(
     val thermal: IntArray,
     val width: Int,
     val height: Int,
+    val hfovDeg: Float,
     val minC: Float,
     val maxC: Float,
     val fps: Float,
@@ -234,7 +235,7 @@ class Renderer(private val model: Model) {
         val scale = 255f / (b - a)
         val levels = IntArray(n) { i -> ((thermal[i] - a) * scale).toInt().coerceIn(0, 255) }
         return DisplayFrame(
-            levels, thermal, model.width, model.height,
+            levels, thermal, model.width, model.height, model.hfov,
             minC = rawToCelsius(sorted[0]),
             maxC = rawToCelsius(sorted[n - 1]),
             fps = fps,

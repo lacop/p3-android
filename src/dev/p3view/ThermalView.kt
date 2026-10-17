@@ -51,6 +51,13 @@ class ThermalView(context: Context) : View(context) {
     var palette: Palette = Palette.ALL[0]
         set(v) { field = v; shown = null; invalidate() }
 
+    /** With the phone camera behind, the background is transparent and the image is blended. */
+    var overlay = false
+        set(v) { field = v; invalidate() }
+
+    var opacity = 0.5f
+        set(v) { field = v; invalidate() }
+
     /** Space kept free at the top for the button row. */
     var topReserve = 0f
 
@@ -64,10 +71,18 @@ class ThermalView(context: Context) : View(context) {
         postInvalidate()
     }
 
+    /**
+     * Told (on the UI thread) when the drawn image's long side in pixels or its lens field of
+     * view changes, so the camera overlay can match its scale to the thermal image.
+     */
+    var imageListener: ((longSidePx: Float, hfovDeg: Float) -> Unit)? = null
+    private var reportedLong = 0f
+    private var reportedFov = 0f
+
     /** Scale that fits the rotated frame on screen. */
-    private fun scaleFor(f: DisplayFrame): Float {
-        val dw = if (quarterTurns % 2 == 1) f.height else f.width
-        val dh = if (quarterTurns % 2 == 1) f.width else f.height
+    private fun scaleFor(fw: Int, fh: Int): Float {
+        val dw = if (quarterTurns % 2 == 1) fh else fw
+        val dh = if (quarterTurns % 2 == 1) fw else fh
         return minOf(width / dw.toFloat(), height / dh.toFloat())
     }
 
@@ -80,7 +95,7 @@ class ThermalView(context: Context) : View(context) {
             var u = e.x - width / 2f
             var v = e.y - height / 2f
             repeat(quarterTurns) { val t = u; u = v; v = -t }
-            val s = scaleFor(f)
+            val s = scaleFor(f.width, f.height)
             val px = (0.5f + u / (f.width * s)).times(f.width).toInt().coerceIn(0, f.width - 1)
             val py = (0.5f + v / (f.height * s)).times(f.height).toInt().coerceIn(0, f.height - 1)
             crossX = (px + 0.5f) / f.width
@@ -91,7 +106,19 @@ class ThermalView(context: Context) : View(context) {
     }
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(Color.BLACK)
+        if (!overlay) c.drawColor(Color.BLACK)
+        imagePaint.alpha = if (overlay) (opacity * 255).toInt() else 255
+        // Before the first frame assume the P3's shape so the overlay still has a size to match.
+        val frameNow = latest.get()
+        val fw = frameNow?.width ?: 4
+        val fh = frameNow?.height ?: 3
+        val long = maxOf(fw, fh) * scaleFor(fw, fh)
+        val fov = frameNow?.hfovDeg ?: Model.ALL[0].hfov
+        if (long != reportedLong || fov != reportedFov) {
+            reportedLong = long
+            reportedFov = fov
+            post { imageListener?.invoke(long, fov) }
+        }
         val safe = rootWindowInsets?.getInsetsIgnoringVisibility(
             WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
         )
@@ -114,7 +141,7 @@ class ThermalView(context: Context) : View(context) {
                 bmp.setPixels(pixels, 0, f.width, 0, 0, f.width, f.height)
                 shown = f
             }
-            val s = scaleFor(f)
+            val s = scaleFor(f.width, f.height)
             val w = f.width * s
             val h = f.height * s
             val mx = width / 2f

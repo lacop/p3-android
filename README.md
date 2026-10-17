@@ -42,7 +42,11 @@ build installs over the previous one.
 
 The screen shows the thermal image, the temperature at the crosshair, frame min/max and fps.
 Tap or drag on the image to move the crosshair. Buttons at the top right: colour scheme
-(popup menu), rotate 90°, and shutter (NUC). Rotation and colour scheme are remembered.
+(popup menu), rotate 90°, shutter (NUC), and the phone-camera overlay toggle. With the overlay
+on, the rear camera shows behind the thermal image and an extra button opens the lens, zoom
+and opacity controls, which apply live. Zoom 1× scales the camera image to the same field of
+view as the thermal lens (P3 40°, P1 52° horizontal), so the zoom and shift sliders only fine-tune.
+All settings are remembered (zoom and shift per lens).
 After an error, tap the screen to retry. The stream stops when the app leaves the
 foreground and restarts when it returns.
 
@@ -56,6 +60,7 @@ src/dev/p3view/Camera.kt       USB session thread: claim, commands, stream start
 src/dev/p3view/ThermalView.kt  draws the frame scaled, rotated, palette, crosshair, text
 src/dev/p3view/Palette.kt      colour schemes
 src/dev/p3view/IconButton.kt   canvas-drawn round buttons
+src/dev/p3view/Overlay.kt      rear camera lenses, camera2 preview session, zoomable preview view
 src/dev/p3view/MainActivity.kt permissions, attach/detach, lifecycle
 test/ProtocolTest.kt           JVM tests for Protocol.kt, run by build.sh
 build.sh                       aapt2 -> kotlinc -> d8 -> zip -> zipalign -> apksigner

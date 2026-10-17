@@ -9,27 +9,57 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.Gravity
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup.LayoutParams
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.SeekBar
+import android.widget.TextView
+import android.widget.Toast
 import android.widget.PopupMenu
 
 private const val ACTION_USB_PERMISSION = "dev.p3view.USB_PERMISSION"
 private const val PREF_ROTATION = "rotation"
 private const val PREF_PALETTE = "palette"
+private const val PREF_OVERLAY = "overlay"
+private const val PREF_LENS = "lens"
+private const val PREF_OPACITY = "opacity"
+private const val PREF_ZOOM = "fovzoom_" // + lens key; zoom 1 = same field of view as the thermal image
+private const val PREF_PAN_X = "panx_"
+private const val PREF_PAN_Y = "pany_"
+private const val ZOOM_MIN = 0.5f
+private const val ZOOM_MAX = 2f
+private const val PAN_MAX = 0.3f
 
 class MainActivity : Activity(), SessionListener {
     private lateinit var usb: UsbManager
     private lateinit var view: ThermalView
     private lateinit var prefs: SharedPreferences
+    private lateinit var preview: CameraPreview
+    private lateinit var overlayCamera: OverlayCamera
+    private lateinit var overlayButton: IconButton
+    private lateinit var tuneButton: IconButton
+    private lateinit var buttons: LinearLayout
+    private var lenses = emptyList<Lens>()
+    private var lens: Lens? = null
+    private var overlayOn = false
+    private var started = false
+    private var refreshPanel: (() -> Unit)? = null
     private var session: CameraSession? = null
     private var sessionDevice: String? = null
     private var permissionPending = false
@@ -99,9 +129,46 @@ class MainActivity : Activity(), SessionListener {
                 if (s != null && s.isAlive) s.shutter()
             }
         }
-        val buttons = LinearLayout(this).apply {
+
+        lenses = runCatching { findLenses(getSystemService(CameraManager::class.java)) }.getOrDefault(emptyList())
+        lens = lenses.firstOrNull { it.key == prefs.getString(PREF_LENS, null) }
+            ?: lenses.firstOrNull { it.label == "1×" } ?: lenses.firstOrNull()
+        overlayOn = prefs.getBoolean(PREF_OVERLAY, false) && lens != null
+        overlayCamera = OverlayCamera(this) { msg -> runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() } }
+        preview = CameraPreview(this).apply {
+            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) = updateOverlay()
+                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    overlayCamera.stop()
+                    return true
+                }
+            }
+        }
+        lens?.let(::applyLensState)
+        view.imageListener = { longPx, fov -> preview.matchTo(longPx, fov) }
+        view.opacity = prefs.getFloat(PREF_OPACITY, 0.5f)
+        overlayButton = IconButton(this, IconButton.Kind.OVERLAY).apply {
+            setOnClickListener {
+                if (lens == null) {
+                    Toast.makeText(this@MainActivity, "No rear camera found", Toast.LENGTH_SHORT).show()
+                } else {
+                    overlayOn = !overlayOn
+                    prefs.edit().putBoolean(PREF_OVERLAY, overlayOn).apply()
+                    if (overlayOn && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
+                    }
+                    applyOverlayState()
+                }
+            }
+        }
+        tuneButton = IconButton(this, IconButton.Kind.TUNE).apply {
+            setOnClickListener { showOverlayPanel() }
+        }
+        buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            for (b in listOf(paletteButton, rotateButton, shutterButton)) {
+            for (b in listOf(tuneButton, overlayButton, paletteButton, rotateButton, shutterButton)) {
                 addView(b, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
                     marginStart = (8 * dp).toInt()
                 })
@@ -115,6 +182,8 @@ class MainActivity : Activity(), SessionListener {
             }
         }
         setContentView(FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(preview, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(view, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(buttons, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
         })
@@ -124,6 +193,7 @@ class MainActivity : Activity(), SessionListener {
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        applyOverlayState()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -134,22 +204,30 @@ class MainActivity : Activity(), SessionListener {
 
     override fun onResume() {
         super.onResume()
+        started = true
+        updateOverlay()
         connect()
     }
 
     override fun onStop() {
+        started = false
+        updateOverlay()
         super.onStop()
         stopSession()
     }
 
     override fun onDestroy() {
         unregisterReceiver(receiver)
+        overlayCamera.stop()
         stopSession()
         super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) connect()
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            connect()
+            updateOverlay()
+        }
     }
 
     private fun connect(fromUser: Boolean = false) {
@@ -197,6 +275,123 @@ class MainActivity : Activity(), SessionListener {
         sessionDevice = device.deviceName
         session = CameraSession(conn, device, Model.fromPid(device.productId)!!, this).also { it.start() }
     }
+
+    private fun zoomFor(l: Lens) = prefs.getFloat(PREF_ZOOM + l.key, 1f).coerceIn(ZOOM_MIN, ZOOM_MAX)
+
+    /** Shows or hides everything that depends on the overlay toggle. */
+    private fun applyOverlayState() {
+        overlayButton.active = overlayOn
+        tuneButton.visibility = if (overlayOn) View.VISIBLE else View.GONE
+        preview.visibility = if (overlayOn) View.VISIBLE else View.GONE
+        view.overlay = overlayOn
+        updateOverlay()
+    }
+
+    private fun updateOverlay() {
+        val l = lens
+        if (overlayOn && started && l != null && preview.isAvailable &&
+            checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        ) overlayCamera.start(l, preview) else overlayCamera.stop()
+    }
+
+    /** Loads the saved zoom and pan of a lens into the preview. */
+    private fun applyLensState(l: Lens) {
+        preview.zoom = prefs.getFloat(PREF_ZOOM + l.key, 1f).coerceIn(ZOOM_MIN, ZOOM_MAX)
+        preview.panX = prefs.getFloat(PREF_PAN_X + l.key, 0f).coerceIn(-PAN_MAX, PAN_MAX)
+        preview.panY = prefs.getFloat(PREF_PAN_Y + l.key, 0f).coerceIn(-PAN_MAX, PAN_MAX)
+    }
+
+    private fun saveLensState() {
+        val l = lens ?: return
+        prefs.edit().putFloat(PREF_ZOOM + l.key, preview.zoom)
+            .putFloat(PREF_PAN_X + l.key, preview.panX).putFloat(PREF_PAN_Y + l.key, preview.panY).apply()
+    }
+
+    /** Lens, zoom, pan and opacity controls; every change applies live so alignment is easy to tweak. */
+    private fun showOverlayPanel() {
+        val dp = resources.displayMetrics.density
+        val pad = (12 * dp).toInt()
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            setBackgroundColor(0xE6202020.toInt())
+        }
+        fun label() = TextView(this).apply { setTextColor(Color.WHITE) }
+
+        /** Adds a labelled slider; returns a function that sets its value without firing [live]. */
+        fun slider(name: String, min: Float, max: Float, format: (Float) -> String, value: Float,
+                   live: (Float) -> Unit, done: () -> Unit): (Float) -> Unit {
+            val text = label()
+            val bar = SeekBar(this).apply { this.max = Math.round((max - min) * 1000) }
+            fun show(v: Float) {
+                text.text = "$name  ${format(v)}"
+                bar.progress = Math.round((v - min) * 1000)
+            }
+            bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(b: SeekBar, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val v = min + progress / 1000f
+                    text.text = "$name  ${format(v)}"
+                    live(v)
+                }
+                override fun onStartTrackingTouch(b: SeekBar) {}
+                override fun onStopTrackingTouch(b: SeekBar) = done()
+            })
+            col.addView(text)
+            col.addView(bar)
+            show(value)
+            return ::show
+        }
+
+        if (lenses.size > 1) {
+            col.addView(label().apply { text = "Camera" })
+            val group = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
+            lenses.forEachIndexed { i, l ->
+                group.addView(RadioButton(this).apply { id = i; text = l.label; isChecked = l === lens })
+            }
+            col.addView(group)
+            group.setOnCheckedChangeListener { _, id ->
+                val l = lenses[id]
+                lens = l
+                prefs.edit().putString(PREF_LENS, l.key).apply()
+                applyLensState(l)
+                refresh()
+                updateOverlay()
+            }
+        }
+
+        val pct = { v: Float -> "%+.1f%%".format(v * 100) }
+        val setZoom = slider("Zoom", ZOOM_MIN, ZOOM_MAX, { "%.3f×".format(it) }, preview.zoom,
+            { preview.zoom = it }, ::saveLensState)
+        val setPanX = slider("Shift right", -PAN_MAX, PAN_MAX, pct, preview.panX, { preview.panX = it }, ::saveLensState)
+        val setPanY = slider("Shift down", -PAN_MAX, PAN_MAX, pct, preview.panY, { preview.panY = it }, ::saveLensState)
+        slider("Thermal opacity", 0f, 1f, { "${Math.round(it * 100)}%" }, view.opacity,
+            { view.opacity = it }, { prefs.edit().putFloat(PREF_OPACITY, view.opacity).apply() })
+        refreshPanel = {
+            setZoom(preview.zoom)
+            setPanX(preview.panX)
+            setPanY(preview.panY)
+        }
+        col.addView(Button(this).apply {
+            text = "Reset zoom and shift"
+            setOnClickListener {
+                preview.zoom = 1f
+                preview.panX = 0f
+                preview.panY = 0f
+                saveLensState()
+                refresh()
+            }
+        })
+
+        val width = minOf((320 * dp).toInt(), resources.displayMetrics.widthPixels - 2 * pad)
+        PopupWindow(col, width, LayoutParams.WRAP_CONTENT, true).apply {
+            setOnDismissListener { refreshPanel = null }
+        }.showAtLocation(
+            buttons, Gravity.TOP or Gravity.END, buttons.paddingRight, buttons.bottom + (4 * dp).toInt(),
+        )
+    }
+
+    private fun refresh() { refreshPanel?.invoke() }
 
     private fun showPaletteMenu(anchor: View) {
         val menu = PopupMenu(this, anchor)

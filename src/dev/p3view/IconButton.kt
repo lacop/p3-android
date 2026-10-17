@@ -14,7 +14,7 @@ import kotlin.math.sin
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
 class IconButton(context: Context, private val kind: Kind) : View(context) {
-    enum class Kind { SHUTTER, ROTATE, PALETTE }
+    enum class Kind { SHUTTER, ROTATE, PALETTE, OVERLAY, TUNE }
 
     private val dp = resources.displayMetrics.density
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -29,12 +29,18 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     private val box = RectF()
     private var colors = IntArray(0)
 
+    /** Highlighted toggle state. */
+    var active = false
+        set(v) { field = v; invalidate() }
+
     init {
         isClickable = true
         contentDescription = when (kind) {
             Kind.SHUTTER -> "Shutter"
             Kind.ROTATE -> "Rotate"
             Kind.PALETTE -> "Colour scheme"
+            Kind.OVERLAY -> "Phone camera overlay"
+            Kind.TUNE -> "Overlay settings"
         }
     }
 
@@ -58,7 +64,11 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
     override fun onDraw(c: Canvas) {
         val cx = width / 2f
         val cy = height / 2f
-        bg.color = if (isPressed) 0xB0606060.toInt() else 0x80000000.toInt()
+        bg.color = when {
+            isPressed -> 0xB0606060.toInt()
+            active -> 0xCC2979FF.toInt()
+            else -> 0x80000000.toInt()
+        }
         c.drawCircle(cx, cy, width / 2f, bg)
         when (kind) {
             Kind.SHUTTER -> {
@@ -84,6 +94,24 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
                     close()
                 }
                 c.drawPath(head, fill)
+            }
+            Kind.OVERLAY -> {
+                val hw = 11 * dp
+                val hh = 7.5f * dp
+                box.set(cx - hw, cy - hh + 1.5f * dp, cx + hw, cy + hh + 1.5f * dp)
+                c.drawRoundRect(box, 3 * dp, 3 * dp, line.apply { strokeWidth = 1.75f * dp })
+                line.strokeWidth = 2 * dp
+                c.drawCircle(cx, cy + 1.5f * dp, 3.5f * dp, line)
+                c.drawRect(cx - 4 * dp, cy - hh - 1 * dp, cx + 4 * dp, cy - hh + 2 * dp, fill)
+            }
+            Kind.TUNE -> {
+                // Three sliders with knobs at different positions.
+                val half = 10 * dp
+                for ((i, k) in listOf(-0.4f, 0.5f, -0.1f).withIndex()) {
+                    val y = cy + (i - 1) * 7 * dp
+                    c.drawLine(cx - half, y, cx + half, y, line)
+                    c.drawCircle(cx + k * half, y, 3 * dp, fill)
+                }
             }
             Kind.PALETTE -> {
                 val hw = 11 * dp
