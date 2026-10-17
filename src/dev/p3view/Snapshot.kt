@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.net.Uri
 import android.provider.MediaStore
@@ -194,8 +195,15 @@ class SnapshotWriter(private val resolver: ContentResolver, private val onChange
                 val mx = (pts[i] + 0.5f) * k
                 val my = (pts[i + 1] + 0.5f) * k
                 fill.color = if (hot) 0xFFFF3B30.toInt() else 0xFF2979FF.toInt()
-                c.drawCircle(mx, my, 8f, fill)
-                c.drawCircle(mx, my, 8f, ring)
+                val r = 10f
+                val tri = Path().apply {
+                    moveTo(mx, my + if (hot) -r else r)
+                    lineTo(mx - r * 0.866f, my + if (hot) r / 2 else -r / 2)
+                    lineTo(mx + r * 0.866f, my + if (hot) r / 2 else -r / 2)
+                    close()
+                }
+                c.drawPath(tri, fill)
+                c.drawPath(tri, ring)
                 val t = "%.1f".format(if (hot) f.maxC else f.minC)
                 val tw = text.measureText(t)
                 c.drawText(t, if (mx + 14 + tw <= w) mx + 14 else mx - 14 - tw, my + text.textSize / 3, text)

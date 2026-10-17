@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
@@ -36,6 +37,10 @@ class ThermalView(context: Context) : View(context) {
         strokeWidth = 1.5f * dp
     }
     private val scaleRect = RectF()
+    private val markerPath = Path()
+    // Frame minimum and maximum next to the colour scale, tinted like their markers.
+    private val minText = Paint(text).apply { color = 0xFF82B1FF.toInt() }
+    private val maxText = Paint(text).apply { color = 0xFFFF8A80.toInt() }
     private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private var scaleBitmap: Bitmap? = null
     private var shownPalette: Palette? = null
@@ -211,9 +216,19 @@ class ThermalView(context: Context) : View(context) {
                     repeat(quarterTurns) { val t = mu; mu = -mv; mv = t }
                     val x = mx + mu
                     val y = my + mv
+                    // Red triangle pointing up for the hottest pixel, blue pointing down for the coldest;
+                    // the pixel is at the triangle's centre, not its tip.
+                    val r = 6.5f * dp
+                    val tip = if (hot) -r else r
+                    val baseY = if (hot) r / 2 else -r / 2
+                    markerPath.rewind()
+                    markerPath.moveTo(x, y + tip)
+                    markerPath.lineTo(x - r * 0.866f, y + baseY)
+                    markerPath.lineTo(x + r * 0.866f, y + baseY)
+                    markerPath.close()
                     marker.color = if (hot) 0xFFFF3B30.toInt() else 0xFF2979FF.toInt()
-                    c.drawCircle(x, y, 5 * dp, marker)
-                    c.drawCircle(x, y, 5 * dp, markerRing)
+                    c.drawPath(markerPath, marker)
+                    c.drawPath(markerPath, markerRing)
                     val t = "%.1f".format(if (hot) f.maxC else f.minC)
                     val tw = text.measureText(t)
                     c.drawText(t, if (x + 9 * dp + tw <= width) x + 9 * dp else x - 9 * dp - tw, y + text.textSize / 3, text)
@@ -221,29 +236,35 @@ class ThermalView(context: Context) : View(context) {
             }
 
             if (showScale) {
-                // Colour scale just below the thermal image, centred, with the end
-                // temperatures beside it. When the image leaves no room, it sits above the min/max line.
-                val lo = "%.1f °C".format(f.loC)
-                val hi = "%.1f °C".format(f.hiC)
+                // Just below the thermal image, centred:  min | scale low [colour bar] scale high | max
+                // The scale ends are the 1st and 99th percentile the colours cover; min and max are the
+                // real frame extremes. When the image leaves no room it sits above the fps line.
+                val minT = "%.1f".format(f.minC)
+                val maxT = "%.1f".format(f.maxC)
+                val lo = "%.1f".format(f.loC)
+                val hi = "%.1f".format(f.hiC)
                 val img = displayedRect(f)
-                val pad = maxOf(text.measureText(lo), text.measureText(hi)) + 8 * dp
-                val x0 = img.left + 10 * dp + pad
-                val x1 = img.right - 10 * dp - pad
+                val slot = listOf(minT, maxT, lo, hi).maxOf { text.measureText(it) } + 6 * dp
+                val edge = 10 * dp
+                val x0 = img.left + edge + 2 * slot
+                val x1 = img.right - edge - 2 * slot
                 val barBottom = minOf(img.bottom + 6 * dp + 12 * dp, bottom - 22 * dp)
                 val barTop = barBottom - 12 * dp
                 val base = barBottom - (12 * dp - text.textSize * 0.7f) / 2
-                if (x1 > x0 + 20 * dp) {
+                if (x1 > x0 + 30 * dp) {
                     val sb = scaleBitmap?.takeIf { shownPalette === palette } ?: Bitmap.createBitmap(palette.lut, 256, 1, Bitmap.Config.ARGB_8888)
                         .also { scaleBitmap = it; shownPalette = palette }
                     scaleRect.set(x0, barTop, x1, barBottom)
                     c.drawBitmap(sb, null, scaleRect, scalePaint)
                     c.drawRect(scaleRect, markerRing)
-                    c.drawText(lo, x0 - 8 * dp - text.measureText(lo), base, text)
-                    c.drawText(hi, x1 + 8 * dp, base, text)
+                    c.drawText(minT, img.left + edge, base, minText)
+                    c.drawText(lo, x0 - 6 * dp - text.measureText(lo), base, text)
+                    c.drawText(hi, x1 + 6 * dp, base, text)
+                    c.drawText(maxT, img.right - edge - maxText.measureText(maxT), base, maxText)
                 }
             }
 
-            c.drawText("min %.1f °C   max %.1f °C   %.1f fps".format(f.minC, f.maxC, f.fps), left, bottom, text)
+            c.drawText("%.1f fps".format(f.fps), left, bottom, text)
         }
         if (status.isNotEmpty()) {
             val lines = status.split('\n')

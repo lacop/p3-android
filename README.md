@@ -56,7 +56,7 @@ installing unknown apps).
    the prompt next time).
 3. The stream starts after about 3 seconds.
 
-The screen shows the thermal image, the temperature at the crosshair, frame min/max and fps.
+The screen shows the thermal image, the temperature at the crosshair and the fps.
 Tap or drag on the image to move the crosshair. Buttons at the top right: colour scheme
 (popup menu), rotate 90°, shutter (NUC), and the phone-camera overlay toggle. With the overlay
 on, the rear camera shows behind the thermal image and an extra button opens the lens, zoom
@@ -65,11 +65,11 @@ view as the thermal lens (P3 40°, P1 52° horizontal), so the zoom and shift sl
 All settings are remembered (zoom and shift per lens).
 
 The thermometer button (between rotate and shutter) opens toggles for readouts:
-- **Hottest / coldest markers**: tags with temperatures on the hottest and coldest pixel (also
+- **Hottest / coldest markers**: a red triangle (pointing up) on the hottest pixel and a blue one (pointing down) on the coldest, with temperatures (also
   drawn in `-annotated.png` when on).
 - **Lock colour scale**: freezes the current colour range, so colours mean the same temperature
   from frame to frame and between snapshots. Not remembered across launches.
-- **Colour scale bar**: draws the palette with its end temperatures along the bottom.
+- **Colour scale bar** (on by default): under the image, `min | scale low [colour bar] scale high | max`. The scale ends are the 1st and 99th percentile the colours cover, so the real hottest and coldest pixels can lie outside them.
 The marker and scale bar settings are remembered.
 After an error, tap the screen to retry. The stream stops when the app leaves the
 foreground and restarts when it returns.

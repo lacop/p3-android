@@ -170,7 +170,7 @@ class MainActivity : Activity(), SessionListener {
         view.imageListener = { longPx, fov -> preview.matchTo(longPx, fov) }
         view.opacity = prefs.getFloat(PREF_OPACITY, 0.5f)
         view.showMarkers = prefs.getBoolean(PREF_MARKERS, false)
-        view.showScale = prefs.getBoolean(PREF_SCALE, false)
+        view.showScale = prefs.getBoolean(PREF_SCALE, true)
         overlayButton = IconButton(this, IconButton.Kind.OVERLAY).apply {
             setOnClickListener {
                 if (lens == null) {
