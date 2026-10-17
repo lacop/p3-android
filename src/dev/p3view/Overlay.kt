@@ -49,21 +49,33 @@ fun findLenses(mgr: CameraManager): List<Lens> {
         return f * 43.27f / hypot(size.width, size.height) // 35 mm equivalent focal length
     }
 
+    // A phone with a multi-camera exposes its real lenses as the physical cameras behind it. Any
+    // other back ids are alternate entry points (crop zooms and the like), not extra lenses.
+    val multi = grouped.filterValues { it.size > 1 }
     val found = mutableListOf<Candidate>()
-    for ((id, phys) in grouped) {
-        if (phys.size > 1) {
-            for (p in phys) found += Candidate(id, p, runCatching { equiv(p) }.getOrDefault(0f))
-        } else if (id !in physicals) {
-            found += Candidate(id, null, equiv(id))
+    if (multi.isNotEmpty()) {
+        val seen = mutableSetOf<String>()
+        for ((id, phys) in multi) {
+            for (p in phys) if (seen.add(p)) found += Candidate(id, p, runCatching { equiv(p) }.getOrDefault(0f))
         }
+    } else {
+        for (id in back) found += Candidate(id, null, equiv(id))
     }
+    for ((id, phys) in grouped) Log.i(TAG, "back camera $id physical=$phys equiv=${runCatching { equiv(id) }.getOrNull()}")
+    for (c in found) Log.i(TAG, "lens ${c.logical}/${c.physical} equiv=${c.equiv}mm")
     found.sortBy { it.equiv }
     val main = found.filter { it.equiv > 0 }.minByOrNull { abs(ln(it.equiv / 25f)) }
     return found.map {
         val ratio = if (main != null && it.equiv > 0) it.equiv / main.equiv else 1f
-        val label = if (abs(ratio - Math.round(ratio)) < 0.1f) "%.0f×".format(ratio) else "%.1f×".format(ratio)
-        Lens("${it.logical}/${it.physical}", label, it.logical, it.physical)
+        Lens("${it.logical}/${it.physical}", zoomLabel(ratio), it.logical, it.physical)
     }
+}
+
+/** Snaps to the usual zoom stops when close (reported sensor sizes are only roughly right). */
+private fun zoomLabel(ratio: Float): String {
+    val stop = listOf(0.5f, 1f, 2f, 3f, 5f, 10f).minByOrNull { abs(ln(ratio / it)) }!!
+    return if (abs(ln(ratio / stop)) < 0.2f) "%s×".format(if (stop < 1f) "%.1f".format(stop) else "%.0f".format(stop))
+    else "%.1f×".format(ratio)
 }
 
 /** Runs a preview session for one lens at a time. Safe to call start/stop repeatedly from the UI thread. */

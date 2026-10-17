@@ -10,7 +10,9 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.view.View
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** Round translucent button with a canvas-drawn icon, so the app needs no icon resources. */
 class IconButton(context: Context, private val kind: Kind) : View(context) {
@@ -72,8 +74,31 @@ class IconButton(context: Context, private val kind: Kind) : View(context) {
         c.drawCircle(cx, cy, width / 2f, bg)
         when (kind) {
             Kind.SHUTTER -> {
-                c.drawCircle(cx, cy, 10 * dp, line)
-                c.drawCircle(cx, cy, 5 * dp, fill)
+                // Aperture iris: a ring, a small hexagon and each hexagon edge extended to the ring.
+                val outer = 10 * dp
+                val inner = 4 * dp
+                c.drawCircle(cx, cy, outer, line)
+                line.strokeWidth = 1.5f * dp
+                val hex = Path()
+                for (j in 0 until 6) {
+                    val a0 = Math.toRadians(60.0 * j)
+                    val a1 = Math.toRadians(60.0 * (j + 1))
+                    val ax = inner * cos(a0).toFloat()
+                    val ay = inner * sin(a0).toFloat()
+                    val bx = inner * cos(a1).toFloat()
+                    val by = inner * sin(a1).toFloat()
+                    if (j == 0) hex.moveTo(cx + ax, cy + ay)
+                    hex.lineTo(cx + bx, cy + by)
+                    // Extend a -> b past b until it meets the ring.
+                    val len = hypot(bx - ax, by - ay)
+                    val dx = (bx - ax) / len
+                    val dy = (by - ay) / len
+                    val ad = bx * dx + by * dy
+                    val t = -ad + sqrt(ad * ad - (bx * bx + by * by) + outer * outer)
+                    c.drawLine(cx + bx, cy + by, cx + bx + t * dx, cy + by + t * dy, line)
+                }
+                c.drawPath(hex, line)
+                line.strokeWidth = 2 * dp
             }
             Kind.ROTATE -> {
                 val r = 8 * dp
